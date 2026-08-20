@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     llm_api_key: str  # 模型服务平台的api_key
     # 路由规划专用：微调后的 Qwen3-1.7B（vLLM --enable-lora 部署，取值为 LoRA 模块别名 turnplanner）
     llm_router_model: str = "turnplanner"
-    # vLLM 端点（Windows 侧经 SSH 隧道或 AutoDL 端口映射访问）
-    llm_router_base_url: str = "http://127.0.0.1:6006/v1"
+    # AutoDL 公网 HTTPS 端口映射（.env 里 LLM_ROUTER_BASE_URL 可覆盖）
+    llm_router_base_url: str = "https://INSTANCE-REDACTED.westc.seetacloud.com:8443/v1"
     # vLLM 启动参数 --api-key 的值
     llm_router_api_key: str = "sk-REDACTED"
     commerce_api_base_url: str  # 中台服务的地址
