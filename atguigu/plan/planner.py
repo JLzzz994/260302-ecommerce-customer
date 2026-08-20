@@ -7,7 +7,7 @@ from langchain_core.output_parsers import JsonOutputParser
 from atguigu.domain.state import DialogueState
 from atguigu.knowledge.intents import KnowledgeIntent
 from atguigu.prompt.loader import load_prompt_template
-from atguigu.infrastructure.llm import llm_client
+from atguigu.infrastructure.llm import router_client
 from atguigu.history.builder import ChatHistoryBuilder
 from atguigu.task.flows.flows import FlowsList
 from atguigu.plan.turn_plan import TurnPlan
@@ -86,7 +86,7 @@ class TurnPlanner:
 
         # 3. LCEL方式通过链来定义
         # (json格式的字典对象)
-        chain = prompt_template | llm_client | JsonOutputParser()
+        chain = prompt_template | router_client | JsonOutputParser()
 
         # 4. 执行链   # 1.会依次执行三次invoke. prompt_template.invoke("")--->最终提示词 |   llm_client.invoke(最终提示词)--->json格式字符串  | JsonOutputParser().invoke(son格式字符串)----字典对象
         llm_result_dict = await chain.ainvoke(prompt_inputs)

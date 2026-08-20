@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     llm_model: str  # 模型名字
     llm_base_url: str  # 模型服务平台的地址
     llm_api_key: str  # 模型服务平台的api_key
+    # 路由规划专用：微调后的 Qwen3-1.7B（vLLM --enable-lora 部署，取值为 LoRA 模块别名 turnplanner）
+    llm_router_model: str = "turnplanner"
+    # vLLM 端点（Windows 侧经 SSH 隧道或 AutoDL 端口映射访问）
+    llm_router_base_url: str = "http://127.0.0.1:6006/v1"
+    # vLLM 启动参数 --api-key 的值
+    llm_router_api_key: str = "sk-REDACTED"
     commerce_api_base_url: str  # 中台服务的地址
     database_url: str  # AI应用对应的数据库地址
     app_host: str  # AI应用的访问域名
