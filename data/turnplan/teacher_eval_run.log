@@ -1,0 +1,22 @@
+已落盘 22 条场景 → D:\大模型0301\teacher_code\260302-ecommerce-customer\data\turnplan\inputs.jsonl
+期望轨道分布: {
+  "chitchat": 2,
+  "task": 14,
+  "knowledge": 4,
+  "MISSING_TRACK(澄清)": 1,
+  "task+knowledge": 1
+}
+从 D:\大模型0301\teacher_code\260302-ecommerce-customer\data\turnplan\variants.jsonl 恢复 401 条变体
+扩量完成：池 423 = 基础 22 + 变体 401 → 训练 323 / 评测 100
+  训练数据 → D:\大模型0301\teacher_code\260302-ecommerce-customer\data\turnplan\sft_train.jsonl
+  评测集   → D:\大模型0301\teacher_code\260302-ecommerce-customer\data\turnplan\eval_set.jsonl（待人工核对 label）
+对 eval 集跑 teacher 基线 ...
+  teacher-eval 进度 20/100
+  teacher-eval 进度 40/100
+  teacher-eval 进度 60/100
+  teacher-eval 进度 80/100
+  teacher-eval 进度 100/100
+teacher-eval 完成 → D:\大模型0301\teacher_code\260302-ecommerce-customer\data\turnplan\teacher_eval.jsonl
+  格式合规率(valid): 91/100 = 91.0%
+  与label一致(match): 61/100 = 61.0%
+  解析失败(error): 5/100

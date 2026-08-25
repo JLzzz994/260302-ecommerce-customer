@@ -3,18 +3,18 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from atguigu.domain.messages import BotMessage
-from atguigu.domain.state import DialogueState
+from atguigu.graph.context import TurnContext
 
 
 @dataclass(slots=True)
 class ActionResult:
-    messages: list[BotMessage] = field(default_factory=list)  # action_response的run方法一定会给messages内容 但是下面三个action_xxx不一定
+    messages: list[BotMessage] = field(default_factory=list)  # action_response一定会给messages 但是action_xxx不一定
     slots: dict[str, Any] = field(default_factory=dict)  # action_xxx的run方法一定会给slots
 
 
 class Action(ABC):
     """
-    抽象基类
+    抽象基类：所有 Action 只依赖 TurnContext（当前消息/历史/槽位/卡片/过场变量）
     """
 
     name: str
@@ -22,6 +22,6 @@ class Action(ABC):
     @abstractmethod
     async def run(self,
                   action_kwargs: dict[str, Any],
-                  state:DialogueState,
+                  ctx: TurnContext,
                   ) -> ActionResult:
         pass

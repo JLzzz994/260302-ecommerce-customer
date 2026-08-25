@@ -1,10 +1,9 @@
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-from atguigu.history.builder import ChatHistoryBuilder
 from atguigu.infrastructure.llm import llm_client
 from atguigu.domain.messages import BotMessage
-from atguigu.domain.state import DialogueState
+from atguigu.graph.context import TurnContext
 from atguigu.prompt.loader import load_prompt_template
 
 
@@ -12,7 +11,7 @@ class ChitChatResponder:
 
     async def respond_chat(self,
                            chat: str,
-                           state: DialogueState) -> list[BotMessage]:
+                           ctx: TurnContext) -> list[BotMessage]:
         # 1. 加载闲聊的提示词内容
         prompt_template_str = load_prompt_template("chitchat_respond")
 
@@ -23,9 +22,9 @@ class ChitChatResponder:
         chain = prompt_template | llm_client | StrOutputParser()
 
         # 4. 执行返回
-        result = await  chain.ainvoke({
+        result = await chain.ainvoke({
             "user_message": chat,
-            "history": ChatHistoryBuilder.build(state.current_session().turns[-10:])
+            "history": ctx.history_text(last_n=10)
         })
 
         return [BotMessage(text=result)]

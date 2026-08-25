@@ -1,64 +1,23 @@
-from atguigu.domain.messages import UserMessage, ProcessResult, ChatHistoryMessage
-from atguigu.engine.dialogue_engine import DialogueEngine
-from atguigu.history.builder import ChatHistoryBuilder
-from atguigu.repository.dialogue_repository import DialogueRepository
+"""
+对话服务：API 层与图之间的薄门面（LangGraph 版）
+
+与旧版的区别：状态管理完全交给 LangGraph checkpointer
+（thread_id=sender_id 自动按用户隔离/持久化/恢复中断点），
+service 不再读写 DialogueState，也不再依赖数据库 repository。
+"""
+
+from atguigu.domain.messages import UserMessage, ProcessResult
 
 
 class DialogueService:
 
-    def __init__(self,
-                 engine: DialogueEngine,
-                 repository: DialogueRepository
-                 ):
-        self._engine = engine
-        self._repository = repository
+    def __init__(self, dialogue_app):
+        self._app = dialogue_app
 
     async def process_message(self, user_message: UserMessage) -> ProcessResult:
-        """
-        每一轮对话都会做数据库读写操作和引擎的计算
-        Args:
-            user_message:
+        """一轮对话 = 图的一次 invoke（新输入 或 interrupt 恢复）"""
+        return await self._app.chat(user_message)
 
-        Returns:
-
-        """
-
-        # 1. 从数据库中读取最新的状态
-        dialogue_state = await self._repository.load_state(user_message.sender_id)
-
-        # 2. 调用引擎做各种逻辑处理(调用LLM 进行路由分析、推进流程...)
-        process_result = await self._engine.process_message(user_message, dialogue_state)
-
-        # 3. 将引擎层修改后的最新状态存储到数据库中
-        await self._repository.save_state(user_message.sender_id, dialogue_state)
-
-        # 4. 返回引擎层处理后的结果(机器人回复)
-        return process_result
-
-    async def get_chat_history(self, sender_id: str) -> list[ChatHistoryMessage]:
-        # 1.  查询当前用户对应的整个对话状态
-        state = await self._repository.load_state(sender_id)
-
-        # 2. 获取当前用户对话状态的sessions
-        final_chat_history = []
-        for session in state.sessions:
-
-            for turn in session.turns:
-                user_message = turn.user_message
-
-                user_chat_message = ChatHistoryBuilder.build_chat_history(session.session_id, "user", user_message.text,
-                                                                          user_message.object)
-
-                final_chat_history.append(user_chat_message)
-
-                bot_messages = turn.bot_messages
-
-                for bot_message in bot_messages:
-                    bot_chat_message = ChatHistoryBuilder.build_chat_history(session.session_id,
-                                                                             "bot",
-                                                                             bot_message.text,
-                                                                             bot_message.object)
-
-                    final_chat_history.append(bot_chat_message)
-
-        return final_chat_history
+    async def get_chat_history(self, sender_id: str) -> list[dict]:
+        """messages 通道里的完整历史（checkpointer 里的图状态）"""
+        return await self._app.get_history(sender_id)

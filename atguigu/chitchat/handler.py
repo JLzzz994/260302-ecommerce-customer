@@ -1,6 +1,6 @@
 from atguigu.chitchat.responder import ChitChatResponder
 from atguigu.domain.messages import BotMessage
-from atguigu.domain.state import DialogueState
+from atguigu.graph.context import TurnContext
 
 
 class ChitChatHandler:
@@ -10,5 +10,5 @@ class ChitChatHandler:
 
     async def handle(self,
                      chitchat: str,
-                     state: DialogueState) -> list[BotMessage]:
-        return await self._chat_responder.respond_chat(chitchat, state)
+                     ctx: TurnContext) -> list[BotMessage]:
+        return await self._chat_responder.respond_chat(chitchat, ctx)

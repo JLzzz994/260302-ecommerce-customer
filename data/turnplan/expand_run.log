@@ -1,0 +1,38 @@
+已落盘 22 条场景 → D:\大模型0301\teacher_code\260302-ecommerce-customer\data\turnplan\inputs.jsonl
+期望轨道分布: {
+  "chitchat": 2,
+  "task": 14,
+  "knowledge": 4,
+  "MISSING_TRACK(澄清)": 1,
+  "task+knowledge": 1
+}
+开始同义改写扩量（每场景 20 × 权重）...
+  t14_multi_tracks: 期望 20，实得 19
+  t16_knowledge_product_with_card: 期望 20，实得 18
+  t03_start_logistics_no_slot: 期望 20，实得 17
+  t19_cancel_then_new_start: 期望 20，实得 18
+  t04_start_logistics_with_slot: 期望 20，实得 20
+  t02_chitchat_weather: 期望 20，实得 18
+  t12_resume_unspecified: 期望 40，实得 23
+  t15_start_similar_product: 期望 20，实得 16
+  t10_cancel_flow: 期望 20，实得 17
+  t07_knowledge_policy_no_object: 期望 20，实得 19
+  t01_chitchat_greeting: 期望 20，实得 14
+  t13_vague_missing_track: 期望 20，实得 18
+  t06_start_human_handoff: 期望 20，实得 19
+  t21_knowledge_multi_intents: 期望 20，实得 19
+  t05_start_refund_rich_slots: 期望 60，实得 33
+  t11_resume_specified: 期望 20，实得 16
+  t18_set_slots_with_system_collect: 期望 20，实得 9
+  t17_long_history_then_task: 期望 20，实得 19
+  t08_knowledge_order_with_card: 期望 40，实得 25
+  t20_interrupt_start_new: 期望 20，实得 14
+  [WARN] t09_set_slots_in_collect 一批改写重试 3 次仍失败: APITimeoutError
+  t09_set_slots_in_collect: 期望 60，实得 21
+  [WARN] t22_resume_empty_stack 一批改写重试 3 次仍失败: APITimeoutError
+  t22_resume_empty_stack: 期望 20，实得 9
+变体落盘 401 条 → D:\大模型0301\teacher_code\260302-ecommerce-customer\data\turnplan\variants.jsonl
+扩量完成：池 423 = 基础 22 + 变体 401 → 训练 323 / 评测 100
+  训练数据 → D:\大模型0301\teacher_code\260302-ecommerce-customer\data\turnplan\sft_train.jsonl
+  评测集   → D:\大模型0301\teacher_code\260302-ecommerce-customer\data\turnplan\eval_set.jsonl（待人工核对 label）
+  干跑包   → D:\大模型0301\teacher_code\260302-ecommerce-customer\data\turnplan\dryrun_50.jsonl

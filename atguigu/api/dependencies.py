@@ -1,42 +1,35 @@
 """
-统一管理所有xxxservice
+统一管理所有xxxservice（LangGraph 版）
 
+图应用是"重对象"（编译图+流程子图），但完全无并发可变状态：
+- 图编译产物只读，全局单例
+- MySQL checkpointer 连接池在应用 lifespan 里建/释放
+所以不再用 Depends 每请求构建（旧版每次请求重建整条组件链的开销问题就此消失）
 """
 from typing import Annotated
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
+
 from atguigu.services.dialogue_service import DialogueService
-from atguigu.engine.dialogue_engine import DialogueEngine
-from atguigu.repository.dialogue_repository import DialogueRepository
-# from atguigu.infrastructure.database import session_factory   # "直接"导入成员 ，如果该成员后面会重新生成新的对象，那么别的模块无法获取重新生成的。
-from atguigu.infrastructure import database
-from atguigu.engine.builder import build_dialogue_engine
+
+# 由 app.lifespan 装配好后注入（图编译一次，全局复用）
+_dialogue_app = None
 
 
-def get_dialogue_engine():
-    return build_dialogue_engine()
+def set_dialogue_app(dialogue_app):
+    global _dialogue_app
+    _dialogue_app = dialogue_app
 
 
-DialogueEngineDep = Annotated[DialogueEngine, Depends(get_dialogue_engine)]
+def get_dialogue_app():
+    assert _dialogue_app is not None, "DialogueApp 未初始化：应用启动时需调用 set_dialogue_app"
+    return _dialogue_app
 
 
-async def get_session():
-    async with database.session_factory() as session:  # NoneType
-        yield session  # return session:不能用return
+DialogueAppDep = Annotated[object, Depends(get_dialogue_app)]
 
 
-SessionDep = Annotated[AsyncSession, Depends(get_session)]
-
-
-def get_dialogue_repository(session: SessionDep):
-    return DialogueRepository(session)
-
-
-DialogueRepositoryDep = Annotated[DialogueRepository, Depends(get_dialogue_repository)]
-
-
-def get_dialogue_service(engine: DialogueEngineDep, repository: DialogueRepositoryDep):
-    return DialogueService(engine, repository)
+def get_dialogue_service(app: DialogueAppDep):
+    return DialogueService(app)
 
 
 DialogueServiceDep = Annotated[DialogueService, Depends(get_dialogue_service)]

@@ -1,7 +1,4 @@
-from typing import Any
-
 from atguigu.domain.messages import BotMessage
-from atguigu.domain.state import DialogueState
 from atguigu.task.action.base import Action, ActionResult
 from atguigu.task.action.customer.shared import fetch_product
 
@@ -9,8 +6,8 @@ from atguigu.task.action.customer.shared import fetch_product
 class ActionRecommendSimilarProducts(Action):
     name = "action_recommend_similar_products"
 
-    async def run(self, action_args: dict[str, Any],state: DialogueState) -> ActionResult:
-        product_id = state.activated_task.slots.get("product_id")
+    async def run(self, action_kwargs, ctx) -> ActionResult:
+        product_id = ctx.slots.get("product_id")
         label = product_id or "这件商品"
 
         payload = await fetch_product(product_id)

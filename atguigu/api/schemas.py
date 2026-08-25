@@ -6,8 +6,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from atguigu.domain.messages import ChatHistoryMessage
-
 
 class ChatObject(BaseModel):
     id: str
@@ -39,7 +37,14 @@ class ChatResponse(BaseModel):
     messages: list[ChatBotMessage]
 
 
+class ChatHistoryEntry(BaseModel):
+    """LangGraph 版：历史条目直接来自图状态 messages 通道"""
+    session_id: str
+    role: str  # "user" | "bot"
+    text: str | None = None
+    object: dict[str, Any] | None = None
+
 
 class ChatHistoryResponse(BaseModel):
-    sender_id:str
-    messages:list[ChatHistoryMessage]
+    sender_id: str
+    messages: list[ChatHistoryEntry]

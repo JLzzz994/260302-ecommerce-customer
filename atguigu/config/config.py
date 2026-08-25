@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     database_url: str  # AI应用对应的数据库地址
     app_host: str  # AI应用的访问域名
     app_port: int  # AI 应用的端口
+    # 对话引擎实现开关：langgraph=LangGraph编排版（默认） / classic=自研状态机版
+    # 两个实现组件同源、行为对齐，用于A/B对比与回退
+    dialogue_engine: str = "langgraph"
 
     # 实例化SettingsConfigDict对象一定要有变量接收  并且变量的名字一定要叫model_config
     model_config = SettingsConfigDict(env_file=ENV_FILE_PATH, env_file_encoding="utf-8",

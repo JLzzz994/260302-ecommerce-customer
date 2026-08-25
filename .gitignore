@@ -1,5 +1,8 @@
 .venv/
+.venv-diag/
 .idea/
 __pycache__/
 .env
 .vscode/
+.codegraph/
+.workbuddy/

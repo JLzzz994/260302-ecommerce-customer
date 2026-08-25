@@ -11,8 +11,10 @@ dependencies = [
     "jinja2>=3.1.6",
     "langchain>=1.2.15",
     "langchain-openai>=1.1.14",
+    "langgraph>=1.2.0",
+    "langgraph-checkpoint-mysql>=3.0.0",
     "pydantic-settings>=2.13.1",
     "pyyaml>=6.0.3",
     "sqlalchemy>=2.0.49",
-    "uvicorn[standard]>=0.44.0"
+    "uvicorn[standard]>=0.44.0",
 ]
