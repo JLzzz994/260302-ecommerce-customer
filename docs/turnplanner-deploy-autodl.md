@@ -28,7 +28,7 @@
   --port 6006 --max-model-len 4096 \
   --enable-lora --max-lora-rank 16 \
   --served-model-name qwen3-1.7b \
-  --api-key sk-REDACTED \
+  --api-key sk-<自定义鉴权key> \
   --dtype auto \
   --trust-remote-code \
   --lora-modules turnplanner=/root/autodl-tmp/output/full/v0-20260819-233903/checkpoint-63
@@ -37,7 +37,7 @@
 要点：
 - **业务路由请求 `model` 字段用 `turnplanner`**（LoRA 别名），不是 `qwen3-1.7b`；
 - `--max-lora-rank 16` 按 adapter 实际 rank 精确预留，不浪费显存；
-- `--api-key` 开了鉴权，所有客户端必须带 `Authorization: Bearer sk-REDACTED`。
+- `--api-key` 开了鉴权，所有客户端必须带 `Authorization: Bearer sk-<自定义鉴权key>`。
 
 ## 2. Windows 侧接入（已完成，git 已提交）
 
@@ -88,7 +88,7 @@ ls /root/.cache/modelscope/models/Qwen--Qwen3-1.7B/snapshots/master/*.safetensor
 | 3 | 装出 torch-2.8.0+**cpu** | wheels-cpu 目录的 CPU 版 torch 抢位 | `mv` 走 CPU 版 wheel + `pip install --force-reinstall --no-deps <cuda版.whl>` |
 | 4 | `libcudnn.so.9: cannot open shared object` | nvidia 库不随 CPU torch 安装 | 显式 `pip install` 全部 14 个 `nvidia-*-cu12` 精确版本 |
 | 5 | 装完缺 uvloop 等零星小包 | 同坑 2 的平台条件依赖（uvicorn[standard]） | 自愈循环：`--no-index` 装 → 解析报错里的缺包名 → `pip download` 补 → 重试 |
-| 6 | vLLM 起 API 后所有请求 401 | 启动带了 `--api-key` 但客户端没带 Bearer | 客户端统一 `Authorization: Bearer sk-REDACTED`（评测脚本已修） |
+| 6 | vLLM 起 API 后所有请求 401 | 启动带了 `--api-key` 但客户端没带 Bearer | 客户端统一带 `Authorization: Bearer <你的 --api-key>`（评测脚本已修） |
 | 7 | SSH 连不上（banner 空）但推理服务正常 | 实例 SSH 服务挂/被回收 | AutoDL 控制台重启实例；**注意公网映射地址会变** |
 | 8 | 无卡模式跑模型实验 OOM（exit 137） | 无卡容器内存限额 2GB | 实验放本地（模型 sha256 双端一致则结果等价） |
 

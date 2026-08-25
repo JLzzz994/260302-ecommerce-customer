@@ -79,7 +79,7 @@ async def main() -> None:
     parser.add_argument("--eval-file", type=Path, default=DEFAULT_EVAL)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--base-url", type=str,
-                        default="https://INSTANCE-REDACTED.westc.seetacloud.com:8443/v1")
+                        default="http://127.0.0.1:6006/v1")
     parser.add_argument("--model", type=str, default="turnplanner")
     parser.add_argument("--api-key", type=str, default=settings.llm_router_api_key,
                         help="vLLM --api-key 的值（默认读 settings.llm_router_api_key）")
