@@ -12,7 +12,7 @@ slots:
   order_summary:
     type: text
     label: 订单摘要
-    description: 订单商品、金额等摘要信息
+    description: 订单平台、店铺、仓库、商品与金额等摘要信息
 
   tracking_number:
     type: text
@@ -57,17 +57,15 @@ flows:
       - id: start
         type: start
         next: respond
-
       - id: respond
         type: action
         action: action_response
         args:
           text: "你好，这里是旺店通智能客服助手。我可以协助查询多平台订单与物流、查看商品信息、推荐相似商品、生成售后/退款处理建议；复杂或高风险问题可以转人工客服。"
         next: end
-
       - id: end
         type: end
-        next: [ ]
+        next: []
 
   order_status_query:
     name: 多平台订单状态查询
@@ -76,29 +74,25 @@ flows:
       - id: start
         type: start
         next: ask_order_number
-
       - id: ask_order_number
         type: collect
         slot_name: order_number
         response:
           text: "请告诉我需要查询的订单号。"
         next: lookup_order_status
-
       - id: lookup_order_status
         type: action
         action: action_lookup_order_status
         next: show_order_status
-
       - id: show_order_status
         type: action
         action: action_response
         args:
           text: "订单{{ slots.order_number }}当前状态是：{{ slots.order_status }}。{{ slots.order_summary }}"
         next: end
-
       - id: end
         type: end
-        next: [ ]
+        next: []
 
   logistics_tracking:
     name: 订单物流查询
@@ -107,29 +101,25 @@ flows:
       - id: start
         type: start
         next: ask_order_number
-
       - id: ask_order_number
         type: collect
         slot_name: order_number
         response:
           text: "请告诉我需要查询物流的订单号。"
         next: lookup_logistics
-
       - id: lookup_logistics
         type: action
         action: action_lookup_logistics
         next: show_logistics
-
       - id: show_logistics
         type: action
         action: action_response
         args:
           text: "订单{{ slots.order_number }}由{{ slots.logistics_company }}配送，物流单号是{{ slots.tracking_number }}。当前进度：{{ slots.logistics_status }}。"
         next: end
-
       - id: end
         type: end
-        next: [ ]
+        next: []
 
   refund_request:
     name: 售后/退款建议
@@ -138,36 +128,31 @@ flows:
       - id: start
         type: start
         next: ask_order_number
-
       - id: ask_order_number
         type: collect
         slot_name: order_number
         response:
           text: "请告诉我需要处理售后的订单号。"
         next: ask_refund_reason
-
       - id: ask_refund_reason
         type: collect
         slot_name: refund_reason
         response:
           text: "请简单说明一下退款或售后的原因。"
         next: build_refund_advice
-
       - id: build_refund_advice
         type: action
         action: action_build_refund_advice
         next: show_refund_advice
-
       - id: show_refund_advice
         type: action
         action: action_response
         args:
           text: "订单{{ slots.order_number }}的售后处理建议：{{ slots.refund_advice }}（风险等级：{{ slots.risk_level }}）。该流程不会直接修改订单或提交退款；如需实际执行，请由人工客服复核后处理。"
         next: end
-
       - id: end
         type: end
-        next: [ ]
+        next: []
 
   similar_product_recommendation:
     name: 相似商品推荐
@@ -179,38 +164,31 @@ flows:
           - if: "slots.get('product_id')"
             then: recommend
           - else: ask_product_id
-
       - id: ask_product_id
         type: collect
         slot_name: product_id
         response:
           text: "请先选择或告诉我一个商品，再为你查询相似商品。"
         next: recommend
-
       - id: recommend
         type: action
         action: action_recommend_similar_products
         next: end
-
       - id: end
         type: end
-        next: [ ]
+        next: []
 
   human_handoff:
     name: 人工客服转接
-    description: 为复杂、高风险或用户明确要求人工处理的请求提供转人工业务入口；实际排队、坐席接入与消息路由由 WebSocket transfer_request + TransferManager 完成。
+    description: 用户明确要求人工客服，或复杂/高风险场景需要人工复核时，将会话申请加入 WebSocket 人工坐席队列。
     steps:
       - id: start
         type: start
-        next: respond
-
-      - id: respond
+        next: request_handoff
+      - id: request_handoff
         type: action
-        action: action_response
-        args:
-          text: "这个问题建议由人工客服继续处理。请发起转人工请求进入坐席队列；涉及退款执行、订单修改等高风险操作，会由人工客服复核后处理。"
+        action: action_request_human_handoff
         next: end
-
       - id: end
         type: end
-        next: [ ]
+        next: []
