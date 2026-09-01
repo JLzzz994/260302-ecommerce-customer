@@ -33,10 +33,23 @@ from atguigu.task.flows.links import FlowStepLink
 
 
 def make_turn_context(gs: GraphState) -> TurnContext:
-    """从图状态构建组件读视图（本轮消息 + 排除本轮输入的历史）"""
-    history = [m for m in gs.get("messages", []) if not getattr(m, "additional_kwargs", {}).get("_this_turn")]
+    """从图状态构建组件读视图，只排除“当前这一轮”的用户输入。
+
+    旧实现用布尔 _this_turn 过滤，会把历史上所有用户消息永久排除；
+    现在用 message_id 做唯一标记，因此上一轮用户补充的订单号等信息会正常进入后续 Planner 历史。
+    """
+    current_user = gs.get("user_message")
+    current_message_id = current_user.message_id if current_user is not None else None
+
+    history = []
+    for message in gs.get("messages", []):
+        kwargs = getattr(message, "additional_kwargs", {}) or {}
+        if current_message_id and kwargs.get("_turn_message_id") == current_message_id:
+            continue
+        history.append(message)
+
     return TurnContext(
-        user_message=gs.get("user_message"),
+        user_message=current_user,
         history_messages=history,
         slots=gs.get("slots") or {},
         flow_context=gs.get("flow_context"),
