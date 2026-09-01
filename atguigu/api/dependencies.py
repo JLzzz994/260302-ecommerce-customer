@@ -1,17 +1,17 @@
-"""
-统一管理所有xxxservice（LangGraph 版）
+"""API 依赖装配（LangGraph 版）。
 
-图应用是"重对象"（编译图+流程子图），但完全无并发可变状态：
-- 图编译产物只读，全局单例
-- MySQL checkpointer 连接池在应用 lifespan 里建/释放
-所以不再用 Depends 每请求构建（旧版每次请求重建整条组件链的开销问题就此消失）
+图应用是重对象，但编译产物只读，可作为应用级单例复用。
+PostgreSQL checkpointer 的连接生命周期由 FastAPI lifespan 管理，
+每个用户通过 thread_id=sender_id 隔离自己的 GraphState。
 """
+
 from typing import Annotated
+
 from fastapi import Depends
 
 from atguigu.services.dialogue_service import DialogueService
 
-# 由 app.lifespan 装配好后注入（图编译一次，全局复用）
+
 _dialogue_app = None
 
 
