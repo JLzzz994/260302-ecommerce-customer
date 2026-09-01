@@ -141,10 +141,26 @@ async def agent_ws(websocket: WebSocket, agent_id: str):
                     await _send_error(websocket, f"接入失败：用户 {target} 不在排队中（可能已被其他坐席接入）")
 
             elif msg_type == "agent_chat":
-                await transfer_manager.agent_chat(agent_id, payload.get("sender_id"), payload.get("text", ""))
+                target = payload.get("sender_id")
+                ok = await transfer_manager.agent_chat(
+                    agent_id,
+                    target,
+                    payload.get("text", ""),
+                )
+                if not ok:
+                    await _send_error(
+                        websocket,
+                        f"发送失败：用户 {target} 当前未绑定给坐席 {agent_id}",
+                    )
 
             elif msg_type == "close_session":
-                await transfer_manager.close_session(payload.get("sender_id"), reason="agent_closed")
+                target = payload.get("sender_id")
+                ok = await transfer_manager.agent_close_session(agent_id, target)
+                if not ok:
+                    await _send_error(
+                        websocket,
+                        f"结束失败：用户 {target} 当前未绑定给坐席 {agent_id}",
+                    )
 
             else:
                 await _send_error(websocket, f"未知的消息类型: {msg_type}")
