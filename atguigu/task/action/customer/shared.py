@@ -4,6 +4,7 @@ from urllib.parse import quote
 from atguigu.config.config import settings
 from atguigu.infrastructure import client
 
+
 def _base_url() -> str:
     return settings.commerce_api_base_url.rstrip("/")
 
@@ -37,8 +38,32 @@ async def fetch_product(product_id: str) -> dict | None:
         return None
 
 
+async def fetch_similar_products(product_id: str) -> list[dict[str, Any]]:
+    """调用商品中台相似商品接口；失败时返回空列表，由上层做可解释降级。"""
+    try:
+        r = await client.http_client.get(
+            f"{_base_url()}/products/{quote(product_id)}/similar",
+            params={"limit": 3},
+        )
+        body = r.json()
+        data = body.get("data") if isinstance(body, dict) else None
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        if isinstance(data, dict) and isinstance(data.get("items"), list):
+            return [item for item in data["items"] if isinstance(item, dict)]
+    except Exception:
+        pass
+    return []
+
+
 def _build_order_summary(payload: dict[str, Any]) -> str:
     parts = []
+    platform = payload.get("platform_name") or payload.get("platform")
+    shop_name = payload.get("shop_name") or payload.get("store_name")
+    if platform:
+        parts.append(f"平台：{platform}")
+    if shop_name:
+        parts.append(f"店铺：{shop_name}")
     if payload.get("amount"):
         parts.append(f"订单金额 ¥{payload['amount']}")
     items = payload.get("items") or []
