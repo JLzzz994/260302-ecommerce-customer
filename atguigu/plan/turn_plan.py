@@ -1,28 +1,24 @@
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
-from dataclasses import dataclass
 
 from atguigu.plan.commands import Command
-
-"""
-任务：
-任务的输入：
-约束：
-1.
-2.
-3.
-4. 输出结构（json格式字符串）---->【字典----对象】
-"""
 
 
 @dataclass(slots=True)
 class TaskTurnPlan:
-    commands: list[Command]  # 具体的类型
+    commands: list[Command]
 
     @classmethod
     def from_dict(cls, task_data: dict[str, Any]) -> "TaskTurnPlan":
+        raw_commands = task_data.get("commands")
+        if not isinstance(raw_commands, list):
+            raw_commands = []
         return cls(
-            commands=[Command.from_dict(command_dict) for command_dict in task_data['commands']]
+            commands=[
+                Command.from_dict(item if isinstance(item, dict) else {})
+                for item in raw_commands
+            ]
         )
 
 
@@ -32,9 +28,9 @@ class KnowledgeTurnPlan:
 
     @classmethod
     def from_dict(cls, knowledge_data: dict[str, Any]) -> "KnowledgeTurnPlan":
-        return cls(
-            intents=knowledge_data['intents']
-        )
+        raw = knowledge_data.get("intents")
+        intents = [str(item) for item in raw] if isinstance(raw, list) else []
+        return cls(intents=intents)
 
 
 @dataclass(slots=True)
@@ -43,32 +39,29 @@ class ChitChatTurnPlan:
 
     @classmethod
     def from_dict(cls, chat_data: dict[str, Any]) -> "ChitChatTurnPlan":
-        return cls(
-            chat=chat_data['chat']
-        )
+        return cls(chat=str(chat_data.get("chat") or ""))
 
 
 @dataclass(slots=True)
 class TurnPlan:
-    """
-    数据模型
-    作用：一轮的路由结果
-    """
-    task: TaskTurnPlan | None = None  # 业务流程任务轨道
-    knowledge: KnowledgeTurnPlan | None = None  # 知识检索轨道
-    chitchat: ChitChatTurnPlan | None = None  # 闲聊轨道
+    task: TaskTurnPlan | None = None
+    knowledge: KnowledgeTurnPlan | None = None
+    chitchat: ChitChatTurnPlan | None = None
 
     @classmethod
     def from_dict(cls, turn_plan_data: dict[str, Any]) -> "TurnPlan":
+        if not isinstance(turn_plan_data, dict):
+            turn_plan_data = {}
+        task_data = turn_plan_data.get("task")
+        knowledge_data = turn_plan_data.get("knowledge")
+        chitchat_data = turn_plan_data.get("chitchat")
         return cls(
-            task=TaskTurnPlan.from_dict(turn_plan_data['task']) if turn_plan_data.get('task') is not None else None,
-            knowledge=KnowledgeTurnPlan.from_dict(turn_plan_data['knowledge']) if turn_plan_data.get(
-                'knowledge') is not None else None,
-            chitchat=ChitChatTurnPlan.from_dict(turn_plan_data['chitchat']) if turn_plan_data.get(
-                'chitchat') is not None else None
+            task=TaskTurnPlan.from_dict(task_data) if isinstance(task_data, dict) else None,
+            knowledge=KnowledgeTurnPlan.from_dict(knowledge_data) if isinstance(knowledge_data, dict) else None,
+            chitchat=ChitChatTurnPlan.from_dict(chitchat_data) if isinstance(chitchat_data, dict) else None,
         )
 
-    def activated_tracks(self):
+    def activated_tracks(self) -> list[str]:
         tracks = []
         if self.task is not None:
             tracks.append("task")
@@ -76,26 +69,28 @@ class TurnPlan:
             tracks.append("knowledge")
         if self.chitchat is not None:
             tracks.append("chitchat")
-
         return tracks
-
-
-
 
 
 class ClarifyReason(Enum):
     MISSING_TRACK = "missing_track"
     MULTIPLE_TRACKS = "multiple_tracks"
+
     MISSING_TASK_COMMANDS = "missing_task_commands"
-    MISSING_KNOWLEDGE_INTENT = "missing_knowledge_intent"
-    MISSING_FOCUSED_OBJECT = "missing_focused_object"
-    OBJECT_REQUIRES_INTENT = "object_requires_intent"
     INVALID_TASK_COMMANDS = "invalid_task_commands"
     MULTIPLE_TASK_FLOWS = "multiple_task_flows"
     UNKNOWN_TASK_FLOW = "unknown_task_flow"
+    UNKNOWN_RESUME_FLOW = "unknown_resume_flow"
+    INVALID_TASK_SLOTS = "invalid_task_slots"
+
+    MISSING_KNOWLEDGE_INTENT = "missing_knowledge_intent"
+    UNKNOWN_KNOWLEDGE_INTENT = "unknown_knowledge_intent"
+    MISSING_FOCUSED_OBJECT = "missing_focused_object"
+
+    OBJECT_REQUIRES_INTENT = "object_requires_intent"
 
 
 @dataclass(slots=True)
 class TurnPlanValidatedResult:
-    valid: bool  # true:校验器校验通过  false 校验器没有校验通过
-    reason: ClarifyReason | None = None  # 校验器校验后给的原因码
+    valid: bool
+    reason: ClarifyReason | None = None
