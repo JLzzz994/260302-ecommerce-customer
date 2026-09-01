@@ -88,7 +88,13 @@ def build_main_graph(*,
 
     async def validate(gs: GraphState) -> dict[str, Any]:
         turn_plan = gs["turn_plan"]
-        validated = validator.validate(turn_plan, gs.get("focused_object"), flows_list, knowledge_intents)
+        validated = validator.validate(
+            turn_plan,
+            gs.get("focused_object"),
+            flows_list,
+            knowledge_intents,
+            active_flow=gs.get("active_flow"),
+        )
 
         updates: dict[str, Any] = {"validated": validated}
 
