@@ -6,7 +6,6 @@ flows:
       - id: start
         type: start
         next: acknowledge
-
       - id: acknowledge
         type: action
         action: action_response
@@ -14,34 +13,32 @@ flows:
           mode: static
           text: "好的，我们先处理{{ context.started_flow_name }}。"
         next: end
-
       - id: end
         type: end
         next: []
 
+  # LangGraph 主路径已使用 interrupt() 做缺槽暂停/恢复；
+  # 保留该系统 flow 仅用于兼容旧配置和回归测试。
   system_collect_information:
-    description: Flow for asking the user for a slot value during a collect step
+    description: Compatibility flow for collecting a missing slot
     name: collect information
     steps:
       - id: start
         type: start
         next: ask
-
       - id: ask
         type: action
         action: action_response
-        args: context.response   # text: "请告诉我你的订单号。" 请告诉我你的订单号---->前端展示[没关系：未来]
-
+        args: context.response
         next: listen
-
       - id: listen
         type: action
-        action: action_listen    # 引擎不能在向下执行（停止）---action_listen
+        action: action_listen
         next: end
-
       - id: end
         type: end
         next: []
+
   system_task_resumed:
     description: Flow for acknowledging that a paused task has been resumed
     name: task resumed acknowledgement
@@ -49,7 +46,6 @@ flows:
       - id: start
         type: start
         next: acknowledge
-
       - id: acknowledge
         type: action
         action: action_response
@@ -57,7 +53,6 @@ flows:
           mode: static
           text: "好的，我们继续刚才的{{ context.resumed_flow_name }}。"
         next: end
-
       - id: end
         type: end
         next: []
@@ -69,19 +64,15 @@ flows:
       - id: start
         type: start
         next: acknowledge
-
       - id: acknowledge
         type: action
         action: action_response
         args:
-          text: "当前没有找到可以继续的业务流程。你可以告诉我需要从头办理什么业务。"
+          text: "当前没有找到可以继续的业务流程。你可以告诉我需要从头处理什么客服问题。"
         next: end
-
       - id: end
         type: end
-        next: [ ]
-
-
+        next: []
 
   system_task_interrupted:
     description: Flow for acknowledging that the current task has been interrupted
@@ -90,7 +81,6 @@ flows:
       - id: start
         type: start
         next: acknowledge
-
       - id: acknowledge
         type: action
         action: action_response
@@ -98,7 +88,6 @@ flows:
           mode: static
           text: "好的，我们先把{{ context.interrupted_flow_name }}放一放，先处理{{ context.started_flow_name }}。"
         next: end
-
       - id: end
         type: end
         next: []
@@ -110,8 +99,6 @@ flows:
       - id: start
         type: start
         next: acknowledge
-
-
       - id: acknowledge
         type: action
         action: action_response
@@ -119,7 +106,6 @@ flows:
           mode: static
           text: "好的，{{ context.canceled_flow_name }}先帮你取消。"
         next: end
-
       - id: end
         type: end
         next: []
@@ -144,10 +130,10 @@ flows:
         action: action_response
         args:
           mode: rephrase
-          text: "看来我刚才理解偏了。你可以重新说一下你想查订单、查物流，还是申请退款吗？"
+          text: "看来我刚才理解偏了。你可以重新说一下是要查订单、查物流、咨询售后/退款建议、推荐商品，还是转人工客服吗？"
           prompt: |
-            你是一个中文电商客服助手，语气自然、友好、简洁。
-            请基于下面的建议回复，生成一句更自然的中文回复，保持原意，不要扩写。
+            你是旺店通商家侧中文智能客服助手，语气自然、专业、简洁。
+            请基于下面的建议回复生成一句更自然的中文回复，保持原意，不要扩写，也不要声称已经执行退款、取消订单或修改业务数据。
             对话上下文：
             {history}
             用户最后一句：
@@ -161,10 +147,10 @@ flows:
         action: action_response
         args:
           mode: rephrase
-          text: "我理解你的意思，不过这个能力目前还没有接入。"
+          text: "我理解你的意思，不过这个能力目前还没有接入；涉及实际退款、订单修改等操作需要转人工复核。"
           prompt: |
-            你是一个中文电商客服助手，语气自然、友好、简洁。
-            请基于下面的建议回复，生成一句更自然的中文回复，保持原意，不要扩写。
+            你是旺店通商家侧中文智能客服助手，语气自然、专业、简洁。
+            请保持原意进行改写，不要声称已经执行任何高风险业务动作。
             对话上下文：
             {history}
             用户最后一句：
@@ -178,10 +164,10 @@ flows:
         action: action_response
         args:
           mode: rephrase
-          text: "我暂时没有查到合适的信息。你可以换个说法，或者告诉我更具体一点的商品或订单信息。"
+          text: "我暂时没有查到合适的信息。你可以补充具体的商品、订单或平台信息，也可以转人工客服进一步确认。"
           prompt: |
-            你是一个中文电商客服助手，语气自然、友好、简洁。
-            请基于下面的建议回复，生成一句更自然的中文回复，保持原意，不要扩写。
+            你是旺店通商家侧中文智能客服助手，语气自然、专业、简洁。
+            请保持原意进行改写，不要扩写。
             对话上下文：
             {history}
             用户最后一句：
@@ -195,10 +181,10 @@ flows:
         action: action_response
         args:
           mode: rephrase
-          text: "抱歉，我这边没有完全听明白。你可以再具体说一下你想处理什么电商问题吗？"
+          text: "抱歉，我还没有完全理解。请再说明一下要处理的订单、物流、商品或售后问题。"
           prompt: |
-            你是一个中文电商客服助手，语气自然、友好、简洁。
-            请基于下面的建议回复，生成一句更自然的中文回复，保持原意，不要扩写。
+            你是旺店通商家侧中文智能客服助手，语气自然、专业、简洁。
+            请保持原意进行改写，不要扩写。
             对话上下文：
             {history}
             用户最后一句：
@@ -209,4 +195,4 @@ flows:
 
       - id: end
         type: end
-        next: [ ]
+        next: []
