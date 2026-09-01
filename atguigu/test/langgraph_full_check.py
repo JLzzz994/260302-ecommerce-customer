@@ -328,8 +328,51 @@ async def test_handoff_without_agent():
     check(any("不会直接执行" in t for t in texts), "高风险动作继续保持人工边界")
 
 
+async def test_agent_session_ownership():
+    print("[10] 人工坐席：会话归属校验")
+    from atguigu.api.transfer_manager import TransferManager
+
+    class FakeConnections:
+        def __init__(self):
+            self.user_messages = []
+            self.agent_messages = []
+
+        async def send_to_user(self, sender_id, payload):
+            self.user_messages.append((sender_id, payload))
+            return True
+
+        async def send_to_agent(self, agent_id, payload):
+            self.agent_messages.append((agent_id, payload))
+            return True
+
+        async def broadcast_to_agents(self, payload):
+            return None
+
+        def has_online_agents(self):
+            return True
+
+    connections = FakeConnections()
+    manager = TransferManager(connections)
+    session = manager.get_or_create_session("buyer-001")
+    session.mode = "human"
+    session.agent_id = "agent-a"
+
+    bad_chat = await manager.agent_chat("agent-b", "buyer-001", "越权消息")
+    check(not bad_chat, "其他坐席不能向已绑定用户发送消息")
+    check(not connections.user_messages, "越权消息没有下发给用户")
+
+    good_chat = await manager.agent_chat("agent-a", "buyer-001", "正常回复")
+    check(good_chat, "绑定坐席可以正常回复")
+
+    bad_close = await manager.agent_close_session("agent-b", "buyer-001")
+    check(not bad_close and session.mode == "human", "其他坐席不能结束该人工会话")
+
+    good_close = await manager.agent_close_session("agent-a", "buyer-001")
+    check(good_close and session.mode == "machine", "绑定坐席可以结束会话并切回机器人")
+
+
 async def test_knowledge_and_chitchat():
-    print("[10] 知识/闲聊轨道 + 无流程卡片澄清")
+    print("[11] 知识/闲聊轨道 + 无流程卡片澄清")
     plans = [
         TurnPlan(knowledge=KnowledgeTurnPlan(intents=["refund_policy"])),
         TurnPlan(chitchat=ChitChatTurnPlan(chat="你好")),
@@ -357,5 +400,6 @@ if __name__ == "__main__":
     asyncio.run(test_refund_read_only_boundary())
     asyncio.run(test_recommendation_fallback())
     asyncio.run(test_handoff_without_agent())
+    asyncio.run(test_agent_session_ownership())
     asyncio.run(test_knowledge_and_chitchat())
     print("\n全部通过 ✅ 旺店通 LangGraph：多轮历史、interrupt恢复、Validator白名单、售后只读、推荐降级、人工转接均正常")
