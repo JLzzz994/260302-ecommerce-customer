@@ -198,7 +198,7 @@ flows:
 
   human_handoff:
     name: 人工客服转接
-    description: 将复杂、高风险或用户明确要求人工处理的对话切换到 WebSocket 人工坐席通道。
+    description: 为复杂、高风险或用户明确要求人工处理的请求提供转人工业务入口；实际排队、坐席接入与消息路由由 WebSocket transfer_request + TransferManager 完成。
     steps:
       - id: start
         type: start
@@ -208,7 +208,7 @@ flows:
         type: action
         action: action_response
         args:
-          text: "好的，我为你转接人工客服。涉及退款执行、订单修改等高风险操作，会由人工客服复核后处理。"
+          text: "这个问题建议由人工客服继续处理。请发起转人工请求进入坐席队列；涉及退款执行、订单修改等高风险操作，会由人工客服复核后处理。"
         next: end
 
       - id: end
