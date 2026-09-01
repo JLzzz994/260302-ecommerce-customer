@@ -1,3 +1,8 @@
+> [!WARNING]
+> **Legacy 实验文档**：本文记录原仓库的 Qwen3-1.7B / 100 条 eval 实验过程，不代表 `feature/wangdiantong-customer-service` 当前业务版本。
+> 当前分支使用 Qwen2.5-7B-Instruct 路由口径、PostgreSQL Checkpoint 和 200 条动态渲染锁定集。
+> 当前版本请优先阅读 `README.md` 与 `docs/wangdiantong-interview-story.md`。
+
 # TurnPlanner 模型微调方案与面试话术
 
 > 目标：把系统里最高频、最该确定性的 LLM 调用点——路由规划器（TurnPlanner）——从「调 qwen-plus 大模型 API」换成「微调后的本地 Qwen3-1.7B 小模型」，在**保留三层防御（规划→校验→澄清）不变**的前提下，降成本、降延迟、降澄清率。
