@@ -1,11 +1,4 @@
-"""
-各种command
-总结：四种Command
-开启业务流程对应Command
-填写槽位信息对应Command
-取消业务流程对应Command
-恢复业务流程对应Command
-"""
+"""TurnPlanner 支持的四类确定性命令。"""
 
 from dataclasses import dataclass
 from typing import Any
@@ -13,23 +6,38 @@ from typing import Any
 
 @dataclass(slots=True)
 class Command:
-    """
-    四种命令的基类
-    """
     command: str
 
     @staticmethod
     def from_dict(command_data: dict[str, Any]) -> "Command":
-        command = command_data['command']
+        """把模型 JSON 转成命令对象。
 
-        clz = COMMAND_TO_CLASS[command]
+        未知 command 不直接抛 KeyError，而是先保留成基类 Command，
+        交给 TurnPlanValidator 统一判定为 INVALID_TASK_COMMANDS。
+        """
+        command = str(command_data.get("command") or "")
+        clz = COMMAND_TO_CLASS.get(command)
+        if clz is None:
+            return Command(command=command)
 
-        return clz(**command_data)
+        if clz is StartFlowCommand:
+            return StartFlowCommand(command=command, flow=str(command_data.get("flow") or ""))
+        if clz is ResumeFlowCommand:
+            return ResumeFlowCommand(command=command, flow=command_data.get("flow"))
+        if clz is CancelFlowCommand:
+            return CancelFlowCommand(command=command, flow=command_data.get("flow"))
+        if clz is SetSlotsCommand:
+            raw_slots = command_data.get("slots")
+            return SetSlotsCommand(
+                command=command,
+                slots=raw_slots if isinstance(raw_slots, dict) else {},
+            )
+        return Command(command=command)
 
 
 @dataclass(slots=True)
 class StartFlowCommand(Command):
-    flow: str  # 业务流程ID,不是业务流程对象
+    flow: str
 
 
 @dataclass(slots=True)
@@ -39,7 +47,7 @@ class SetSlotsCommand(Command):
 
 @dataclass(slots=True)
 class CancelFlowCommand(Command):
-    flow:str  | None=None   # 解包不会发生错误
+    flow: str | None = None
 
 
 @dataclass(slots=True)
@@ -51,15 +59,5 @@ COMMAND_TO_CLASS: dict[str, type[Command]] = {
     "start_flow": StartFlowCommand,
     "resume_flow": ResumeFlowCommand,
     "cancel_flow": CancelFlowCommand,
-    "set_slots": SetSlotsCommand
-
+    "set_slots": SetSlotsCommand,
 }
-
-if __name__ == '__main__':
-    data = {"command": "start_flow", "flow": "order_status"}
-    data1 = {"command": "resume_flow"}
-    data2={"command": "set_slots", "slots": {"order_number": "123456"}}
-
-    print(Command.from_dict(data))
-    print(Command.from_dict(data1))
-    print(Command.from_dict(data2))
