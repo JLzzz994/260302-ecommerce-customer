@@ -2,47 +2,57 @@ slots:
   order_number:
     type: text
     label: 订单号
-    description: 用户的订单号
+    description: 旺店通聚合的多平台订单号
 
   order_status:
     type: text
     label: 订单状态
-    description: 订单当前状态
+    description: 订单当前处理状态
 
   order_summary:
     type: text
     label: 订单摘要
-    description: 订单摘要信息
+    description: 订单商品、金额等摘要信息
 
   tracking_number:
     type: text
     label: 物流单号
-    description: 物流单号
+    description: 订单对应的物流单号
 
   logistics_company:
     type: text
     label: 物流公司
-    description: 物流公司名称
+    description: 订单对应的承运物流公司
 
   logistics_status:
     type: text
     label: 物流进度
-    description: 物流当前进度
+    description: 当前物流履约进度
 
   product_id:
     type: text
     label: 商品ID
-    description: 当前咨询商品的唯一标识
+    description: 旺店通商品中心中的商品唯一标识
 
   refund_reason:
     type: text
-    label: 退款原因
-    description: 申请退款的原因
+    label: 售后原因
+    description: 用户提出退款或售后诉求的原因
+
+  refund_advice:
+    type: text
+    label: 售后处理建议
+    description: 基于订单状态与售后原因生成的只读处理建议
+
+  risk_level:
+    type: text
+    label: 风险等级
+    description: 售后建议的风险等级，用于决定是否转人工复核
 
 flows:
   onboarding:
     name: 欢迎引导
-    description: 在聊天窗口初次打开时欢迎用户，并介绍助手可处理的电商服务。这个 flow 通常由系统主动触发。
+    description: 面向旺店通商家客服场景的欢迎流程，介绍订单、物流、商品、售后建议与人工转接能力。
     steps:
       - id: start
         type: start
@@ -52,7 +62,7 @@ flows:
         type: action
         action: action_response
         args:
-          text: "你好，这里是 Atguigu 电商助手。我可以帮你查订单状态、查物流、了解商品信息，或者提交退款申请。"
+          text: "你好，这里是旺店通智能客服助手。我可以协助查询多平台订单与物流、查看商品信息、推荐相似商品、生成售后/退款处理建议；复杂或高风险问题可以转人工客服。"
         next: end
 
       - id: end
@@ -60,19 +70,20 @@ flows:
         next: [ ]
 
   order_status_query:
-    name: 订单状态查询
-    description: 帮用户查询订单当前的处理状态，例如待付款、待发货、已发货或已完成。
+    name: 多平台订单状态查询
+    description: 通过旺店通业务中台查询淘宝/天猫、京东、拼多多、抖音等渠道聚合订单的当前处理状态。
     steps:
       - id: start
         type: start
         next: ask_order_number
+
       - id: ask_order_number
         type: collect
         slot_name: order_number
         response:
-          text: "请告诉我你的订单号。"
-
+          text: "请告诉我需要查询的订单号。"
         next: lookup_order_status
+
       - id: lookup_order_status
         type: action
         action: action_lookup_order_status
@@ -84,13 +95,14 @@ flows:
         args:
           text: "订单{{ slots.order_number }}当前状态是：{{ slots.order_status }}。{{ slots.order_summary }}"
         next: end
+
       - id: end
         type: end
         next: [ ]
 
   logistics_tracking:
-    name: 物流查询
-    description: 帮用户查询订单物流进度、物流单号和配送公司信息。
+    name: 订单物流查询
+    description: 查询旺店通聚合订单的承运公司、物流单号与最新履约进度。
     steps:
       - id: start
         type: start
@@ -100,7 +112,7 @@ flows:
         type: collect
         slot_name: order_number
         response:
-          text: "请告诉我你的订单号。"
+          text: "请告诉我需要查询物流的订单号。"
         next: lookup_logistics
 
       - id: lookup_logistics
@@ -120,8 +132,8 @@ flows:
         next: [ ]
 
   refund_request:
-    name: 退款申请
-    description: 帮用户提交简单的退款申请，收集订单号和退款原因。
+    name: 售后/退款建议
+    description: 收集订单号与售后原因，结合订单状态生成处理建议；流程只读，不直接发起退款、取消订单或修改审批状态，高风险请求转人工复核。
     steps:
       - id: start
         type: start
@@ -131,23 +143,27 @@ flows:
         type: collect
         slot_name: order_number
         response:
-          text: "请告诉我你的订单号。"
+          text: "请告诉我需要处理售后的订单号。"
         next: ask_refund_reason
 
       - id: ask_refund_reason
         type: collect
         slot_name: refund_reason
         response:
-          text: "请简单说一下退款原因。"
-        next: refund_submitted
+          text: "请简单说明一下退款或售后的原因。"
+        next: build_refund_advice
 
-      - id: refund_submitted
+      - id: build_refund_advice
+        type: action
+        action: action_build_refund_advice
+        next: show_refund_advice
+
+      - id: show_refund_advice
         type: action
         action: action_response
         args:
-          text: "好的，订单{{ slots.order_number }}的退款申请已提交，原因是：{{ slots.refund_reason }}。后续会尽快为你处理。"
+          text: "订单{{ slots.order_number }}的售后处理建议：{{ slots.refund_advice }}（风险等级：{{ slots.risk_level }}）。该流程不会直接修改订单或提交退款；如需实际执行，请由人工客服复核后处理。"
         next: end
-
 
       - id: end
         type: end
@@ -155,33 +171,34 @@ flows:
 
   similar_product_recommendation:
     name: 相似商品推荐
-    description: 基于当前商品为用户推荐类似商品。当前版本先保留流程入口，具体推荐能力后续接入。
+    description: 基于当前商品调用旺店通商品中台的相似商品接口，为客服提供可解释的候选商品推荐。
     steps:
       - id: start
         type: start
         next:
           - if: "slots.get('product_id')"
-            then: respond
+            then: recommend
           - else: ask_product_id
 
       - id: ask_product_id
         type: collect
         slot_name: product_id
         response:
-          text: "请先选择一个商品，再继续咨询。"
-        next: respond
+          text: "请先选择或告诉我一个商品，再为你查询相似商品。"
+        next: recommend
 
-      - id: respond
+      - id: recommend
         type: action
         action: action_recommend_similar_products
         next: end
+
       - id: end
         type: end
         next: [ ]
 
   human_handoff:
-    name: 人工客服
-    description: 将当前对话转交给人工客服处理。
+    name: 人工客服转接
+    description: 将复杂、高风险或用户明确要求人工处理的对话切换到 WebSocket 人工坐席通道。
     steps:
       - id: start
         type: start
@@ -191,7 +208,7 @@ flows:
         type: action
         action: action_response
         args:
-          text: "好的，我来为你转接人工客服，请稍等。"
+          text: "好的，我为你转接人工客服。涉及退款执行、订单修改等高风险操作，会由人工客服复核后处理。"
         next: end
 
       - id: end
