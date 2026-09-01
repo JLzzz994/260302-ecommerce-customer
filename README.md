@@ -198,7 +198,42 @@ GET /products/{product_id}/similar?limit=3
 
 订单、商品、履约数据必须从中台查询，LLM 不允许编造业务事实。
 
-## 9. 旧实验文档
+## 10. Vue 3 演示前端
+
+当前分支新增 `frontend/`，不是旧仓库页面复制，而是直接围绕当前 LangGraph + WebSocket 后端做的最小正式演示。
+
+包含：
+
+- 用户聊天端；
+- 历史消息加载；
+- WebSocket 智能客服；
+- 转人工 / 取消排队；
+- 人工坐席上线；
+- 排队列表；
+- 坐席接入；
+- 人工消息；
+- 结束人工会话。
+
+启动：
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Vite 默认把：
+
+```text
+/api → http://127.0.0.1:18082
+/ws  → ws://127.0.0.1:18082
+```
+
+代理到 FastAPI 后端。
+
+坐席端的 `agent_chat` / `close_session` 会校验 `session.agent_id`，不能跨坐席操作其他人的人工会话。
+
+## 11. 旧实验文档
 
 `docs/turnplanner-*.md`、`docs/turnplan-dataset-log.md` 中部分内容记录原 Qwen3-1.7B / 100 条 eval 实验，用于保留实验过程和排障记录。
 
