@@ -157,16 +157,41 @@ class TransferManager:
         await self._connections.broadcast_to_agents({"type": "queue_update", "queue": self.queue_snapshot()})
         return True
 
-    async def agent_chat(self, agent_id: str, sender_id: str, text: str):
-        """坐席回复用户（服务端主动推送给用户浏览器的就是这条）"""
-        await self._connections.send_to_user(sender_id, {
+    async def agent_chat(self, agent_id: str, sender_id: str, text: str) -> bool:
+        """坐席回复用户；只能操作自己已绑定的人工会话。"""
+        session = self.get_session(sender_id)
+        if (
+            session is None
+            or session.mode != "human"
+            or session.agent_id != agent_id
+        ):
+            return False
+
+        delivered = await self._connections.send_to_user(sender_id, {
             "type": "agent_message",
             "agent_id": agent_id,
             "text": text
         })
+        if not delivered:
+            await self.close_session(sender_id, reason="user_lost")
+            return False
+        return True
+
+    async def agent_close_session(self, agent_id: str, sender_id: str) -> bool:
+        """坐席主动结束会话；校验 sender_id 确实绑定给当前 agent_id。"""
+        session = self.get_session(sender_id)
+        if (
+            session is None
+            or session.mode != "human"
+            or session.agent_id != agent_id
+        ):
+            return False
+
+        await self.close_session(sender_id, reason="agent_closed")
+        return True
 
     async def close_session(self, sender_id: str, reason: Literal["agent_closed", "user_closed", "agent_lost", "user_lost"]):
-        """结束人工会话，双方退回机器人模式"""
+        """内部结束人工会话，双方退回机器人模式。外部坐席必须走 agent_close_session 做归属校验。"""
         session = self.get_session(sender_id)
         if session is None or session.mode != "human":
             return
