@@ -1,3 +1,8 @@
+> [!WARNING]
+> **Legacy 实验文档**：本文记录原仓库的 Qwen3-1.7B / 100 条 eval 实验过程，不代表 `feature/wangdiantong-customer-service` 当前业务版本。
+> 当前分支使用 Qwen2.5-7B-Instruct 路由口径、PostgreSQL Checkpoint 和 200 条动态渲染锁定集。
+> 当前版本请优先阅读 `README.md` 与 `docs/wangdiantong-interview-story.md`。
+
 # TurnPlanner 微调面试叙事手册
 
 > 配套阅读：`turnplanner-finetune.md`（技术方案与阶段规划）、`turnplanner-bf16-merge-pitfall.md`（bf16 事故技术细节）。
