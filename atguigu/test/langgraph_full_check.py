@@ -203,8 +203,68 @@ async def test_checkpointer_persistence():
     check(any("订单A999当前状态" in t for t in texts), "重启后从中断点恢复，用户回答直达流程")
 
 
+async def test_validator_guards():
+    print("[6] Validator 安全闸门：flow / slot / intent 白名单")
+    from atguigu.knowledge.intents import KNOWLEDGE_INTENTS
+    from atguigu.plan.turn_plan import ClarifyReason, KnowledgeTurnPlan
+    from atguigu.plan.validator import TurnPlanValidator
+
+    flows_list = FlowLoader().load_multi_yaml([
+        PROJECT_ROOT / "flow_config" / "system_flows.yml",
+        PROJECT_ROOT / "flow_config" / "user_flows.yml",
+    ])
+    validator = TurnPlanValidator()
+
+    # 模型不能启动系统内部 flow
+    p1 = TurnPlan(task=TaskTurnPlan(commands=[
+        StartFlowCommand(command="start_flow", flow="system_task_started"),
+    ]))
+    r1 = validator.validate(p1, None, flows_list, KNOWLEDGE_INTENTS)
+    check(r1.reason is ClarifyReason.UNKNOWN_TASK_FLOW, "系统 flow 不能由模型启动")
+
+    # order_status_query 只允许 order_number，不允许模型乱写 refund_reason
+    p2 = TurnPlan(task=TaskTurnPlan(commands=[
+        StartFlowCommand(command="start_flow", flow="order_status_query"),
+        SetSlotsCommand(command="set_slots", slots={"refund_reason": "太贵了"}),
+    ]))
+    r2 = validator.validate(p2, None, flows_list, KNOWLEDGE_INTENTS)
+    check(r2.reason is ClarifyReason.INVALID_TASK_SLOTS, "非法槽位 key 被拒绝")
+
+    # 当前活跃订单流程中，正常补 order_number 应通过
+    p3 = TurnPlan(task=TaskTurnPlan(commands=[
+        SetSlotsCommand(command="set_slots", slots={"order_number": "A001"}),
+    ]))
+    r3 = validator.validate(
+        p3,
+        None,
+        flows_list,
+        KNOWLEDGE_INTENTS,
+        active_flow="order_status_query",
+    )
+    check(r3.valid, "活跃流程允许补充白名单槽位")
+
+    # 未知知识 intent 不再 KeyError，而是确定性拒绝
+    p4 = TurnPlan(knowledge=KnowledgeTurnPlan(intents=["made_up_intent"]))
+    r4 = validator.validate(p4, None, flows_list, KNOWLEDGE_INTENTS)
+    check(r4.reason is ClarifyReason.UNKNOWN_KNOWLEDGE_INTENT, "未知知识 intent 被拒绝")
+
+    # 空 intent 有明确原因码
+    p5 = TurnPlan(knowledge=KnowledgeTurnPlan(intents=[]))
+    r5 = validator.validate(p5, None, flows_list, KNOWLEDGE_INTENTS)
+    check(r5.reason is ClarifyReason.MISSING_KNOWLEDGE_INTENT, "空知识 intent 被拒绝")
+
+    # 未知 command 先解析成基类，再由 validator 拦截，避免请求直接 500
+    p6 = TurnPlan.from_dict({
+        "task": {"commands": [{"command": "delete_order", "flow": "order_status_query"}]},
+        "knowledge": None,
+        "chitchat": None,
+    })
+    r6 = validator.validate(p6, None, flows_list, KNOWLEDGE_INTENTS)
+    check(r6.reason is ClarifyReason.INVALID_TASK_COMMANDS, "未知 command 进入 validator 后被拒绝")
+
+
 async def test_knowledge_and_chitchat():
-    print("[6] 知识/闲聊轨道 + 无流程卡片澄清")
+    print("[7] 知识/闲聊轨道 + 无流程卡片澄清")
     plans = [
         TurnPlan(knowledge=KnowledgeTurnPlan(intents=["refund_policy"])),
         TurnPlan(chitchat=ChitChatTurnPlan(chat="你好")),
@@ -228,5 +288,6 @@ if __name__ == "__main__":
     asyncio.run(test_multi_intent_pending())
     asyncio.run(test_card_direct_fill())
     asyncio.run(test_checkpointer_persistence())
+    asyncio.run(test_validator_guards())
     asyncio.run(test_knowledge_and_chitchat())
     print("\n全部通过 ✅ LangGraph 全量改造：interrupt收集/恢复、多意图挂起、卡片、持久化均正常")
