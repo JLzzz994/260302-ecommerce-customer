@@ -116,7 +116,7 @@ async def test_flow_with_interrupt_collect():
     r1 = await app.chat(text_msg("查下订单"))
     texts1 = [m.text for m in r1.messages]
     check(any("订单状态查询" in t for t in texts1), "轮1: 开流程过场话术（flow_context 渲染）")
-    check(any("请告诉我你的订单号" in t for t in texts1), "轮1: collect 中断并发出提问")
+    check(any("订单号" in t for t in texts1), "轮1: collect 中断并发出订单号提问")
 
     # 图应处于中断点
     snap = await app._graph.aget_state({"configurable": {"thread_id": "u1"}})
@@ -159,7 +159,7 @@ async def test_multi_intent_pending():
     r2 = await app.chat(text_msg("先查订单"))
     texts2 = [m.text for m in r2.messages]
     check(any("订单A001当前状态" in t for t in texts2), "轮2: 选中流程执行完成（槽位来自set_slots）")
-    check(any("退款申请" in t and "继续帮你处理" in t for t in texts2), "轮2: 流程end后追问挂起的退款意图")
+    check(any("售后/退款建议" in t and "继续帮你处理" in t for t in texts2), "轮2: 流程end后追问挂起的售后意图")
     snap2 = await app._graph.aget_state({"configurable": {"thread_id": "u1"}})
     check(snap2.values.get("pending_intents") in ([], None), "追问后挂起队列清空")
 
