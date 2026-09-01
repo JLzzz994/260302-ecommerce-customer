@@ -30,13 +30,31 @@ def check(cond: bool, tip: str):
     print(f"  ✓ {tip}")
 
 
+_message_seq = 0
+
+
+def _next_message_id() -> str:
+    global _message_seq
+    _message_seq += 1
+    return f"m{_message_seq}"
+
+
 def text_msg(text: str, sender="u1") -> UserMessage:
-    return UserMessage(sender_id=sender, message_id="m", type=MessageType.TEXT, text=text)
+    return UserMessage(
+        sender_id=sender,
+        message_id=_next_message_id(),
+        type=MessageType.TEXT,
+        text=text,
+    )
 
 
 def card_msg(obj_id="A001", obj_type="order", sender="u1") -> UserMessage:
-    return UserMessage(sender_id=sender, message_id="m", type=MessageType.OBJECT,
-                       object=FocusedObject(id=obj_id, type=obj_type, title=obj_id, attributes={}))
+    return UserMessage(
+        sender_id=sender,
+        message_id=_next_message_id(),
+        type=MessageType.OBJECT,
+        object=FocusedObject(id=obj_id, type=obj_type, title=obj_id, attributes={}),
+    )
 
 
 # ============================== 假组件 ==============================
@@ -131,6 +149,11 @@ async def test_flow_with_interrupt_collect():
     check(snap2.values.get("active_flow") is None, "流程结束（active_flow 清空）")
     check(snap2.values.get("slots", {}).get("order_number") == "A001", "订单号已入槽位")
 
+    history = await app.get_history("u1")
+    user_texts = [item["text"] for item in history if item["role"] == "user"]
+    check("查下订单" in user_texts, "历史保留发起流程的用户话术")
+    check("A001" in user_texts, "interrupt 恢复答案写入持久化历史")
+
 
 async def test_multi_intent_pending():
     print("[3] 多意图 → 挂起意图 → 完成后追问")
@@ -195,8 +218,6 @@ async def test_checkpointer_persistence():
     check(snap is not None, "checkpoint 已写入")
 
     # 模拟进程重启：用同一个 saver 构建全新 DialogueApp（图重新编译）
-    app2 = DialogueApp(*[app1._graph, saver])  # 复用图；真实场景是重新 build_main_graph
-    from atguigu.graph.app import DialogueApp as DA
     app2 = build_app(saver, [])  # planner空脚本：恢复路径不再调planner
     r = await app2.chat(text_msg("A999", sender="u9"))
     texts = [m.text for m in r.messages]
@@ -263,8 +284,52 @@ async def test_validator_guards():
     check(r6.reason is ClarifyReason.INVALID_TASK_COMMANDS, "未知 command 进入 validator 后被拒绝")
 
 
+async def test_refund_read_only_boundary():
+    print("[7] 旺店通售后建议：只读边界")
+    plans = [TurnPlan(task=TaskTurnPlan(commands=[
+        StartFlowCommand(command="start_flow", flow="refund_request"),
+        SetSlotsCommand(
+            command="set_slots",
+            slots={"order_number": "WD-RISK-001", "refund_reason": "商品破损"},
+        ),
+    ]))]
+    app = build_app(make_saver(), plans)
+
+    result = await app.chat(text_msg("订单WD-RISK-001商品破损，客户要求退款", sender="refund-u"))
+    texts = [m.text for m in result.messages]
+    check(any("售后处理建议" in t for t in texts), "生成售后处理建议")
+    check(any("不会直接修改订单或提交退款" in t for t in texts), "明确禁止模型直接执行退款")
+    check(any("风险等级" in t for t in texts), "输出风险等级供人工复核")
+
+
+async def test_recommendation_fallback():
+    print("[8] 相似商品推荐：中台不可用时安全降级")
+    plans = [TurnPlan(task=TaskTurnPlan(commands=[
+        StartFlowCommand(command="start_flow", flow="similar_product_recommendation"),
+        SetSlotsCommand(command="set_slots", slots={"product_id": "SKU-NOT-FOUND"}),
+    ]))]
+    app = build_app(make_saver(), plans)
+
+    result = await app.chat(text_msg("给SKU-NOT-FOUND推荐相似商品", sender="recommend-u"))
+    texts = [m.text for m in result.messages]
+    check(any("暂时没有查到" in t for t in texts), "推荐接口无结果时返回可解释降级")
+
+
+async def test_handoff_without_agent():
+    print("[9] 人工转接：无在线坐席时安全降级")
+    plans = [TurnPlan(task=TaskTurnPlan(commands=[
+        StartFlowCommand(command="start_flow", flow="human_handoff"),
+    ]))]
+    app = build_app(make_saver(), plans)
+
+    result = await app.chat(text_msg("我要转人工", sender="handoff-u"))
+    texts = [m.text for m in result.messages]
+    check(any("没有在线人工客服" in t for t in texts), "无坐席时不假装转接成功")
+    check(any("不会直接执行" in t for t in texts), "高风险动作继续保持人工边界")
+
+
 async def test_knowledge_and_chitchat():
-    print("[7] 知识/闲聊轨道 + 无流程卡片澄清")
+    print("[10] 知识/闲聊轨道 + 无流程卡片澄清")
     plans = [
         TurnPlan(knowledge=KnowledgeTurnPlan(intents=["refund_policy"])),
         TurnPlan(chitchat=ChitChatTurnPlan(chat="你好")),
@@ -289,5 +354,8 @@ if __name__ == "__main__":
     asyncio.run(test_card_direct_fill())
     asyncio.run(test_checkpointer_persistence())
     asyncio.run(test_validator_guards())
+    asyncio.run(test_refund_read_only_boundary())
+    asyncio.run(test_recommendation_fallback())
+    asyncio.run(test_handoff_without_agent())
     asyncio.run(test_knowledge_and_chitchat())
-    print("\n全部通过 ✅ LangGraph 全量改造：interrupt收集/恢复、多意图挂起、卡片、持久化均正常")
+    print("\n全部通过 ✅ 旺店通 LangGraph：多轮历史、interrupt恢复、Validator白名单、售后只读、推荐降级、人工转接均正常")
