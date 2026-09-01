@@ -65,12 +65,12 @@ def build_main_graph(*,
             updates["focused_object"] = user_message.object.to_dict()
             updates["messages"] = [HumanMessage(
                 content=(user_message.text or user_message.object.title or ""),
-                additional_kwargs={"object": user_message.object.to_dict(), "_this_turn": True},
+                additional_kwargs={"object": user_message.object.to_dict(), "_turn_message_id": user_message.message_id},
             )]
         else:
             updates["messages"] = [HumanMessage(
                 content=user_message.text or "",
-                additional_kwargs={"_this_turn": True},
+                additional_kwargs={"_turn_message_id": user_message.message_id},
             )]
         return updates
 
