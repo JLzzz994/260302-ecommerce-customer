@@ -30,7 +30,12 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from atguigu.domain.messages import UserMessage, BotMessage, MessageType
 from atguigu.graph.compiler import FlowCompiler, make_turn_context
-from atguigu.graph.state import GraphState, parse_flow_step
+from atguigu.graph.state import (
+    GraphState,
+    build_paused_flow_snapshot,
+    parse_flow_step,
+    unpack_paused_flow_snapshot,
+)
 from atguigu.plan.turn_plan import ClarifyReason
 
 
@@ -43,8 +48,62 @@ def build_main_graph(*,
                      flows_list,
                      action_runner,
                      checkpointer: BaseCheckpointSaver | None = None):
-    compiler = FlowCompiler(action_runner)
     knowledge_intents = knowledge_handler.knowledge_intents
+
+    async def route_interrupted_turn(
+        gs: GraphState,
+        flow_id: str,
+        step_id: str,
+        slot_name: str,
+        answer: Any,
+    ) -> dict[str, Any]:
+        """collect 恢复输入先过 Planner：槽位答案原地继续，新意图交回父图。"""
+        ctx = make_turn_context(gs)
+        turn_plan = await planner.predict(
+            ctx,
+            flows_list,
+            knowledge_intents,
+            active_flow=flow_id,
+            active_flow_step=step_id,
+            slots=gs.get("slots") or {},
+            paused_flows=gs.get("paused_flows") or {},
+        )
+        validated = validator.validate(
+            turn_plan,
+            gs.get("focused_object"),
+            flows_list,
+            knowledge_intents,
+            active_flow=flow_id,
+        )
+
+        # Planner/Validator 不确定时保持原 collect 语义，避免把正常槽位答案误拦截。
+        if not validated.valid:
+            return {"kind": "answer"}
+
+        if turn_plan.task is not None:
+            commands = turn_plan.task.commands
+            has_control = any(
+                command.command in {"start_flow", "resume_flow", "cancel_flow"}
+                for command in commands
+            )
+            if not has_control:
+                for command in commands:
+                    if command.command == "set_slots" and slot_name in command.slots:
+                        return {"kind": "slot", "value": command.slots[slot_name]}
+                return {"kind": "answer"}
+
+        # task 控制命令，或 knowledge/chitchat：先结束当前子图 invocation，
+        # 再由父图 interrupt_dispatch 做真正的暂停/切换。
+        return {
+            "kind": "parent",
+            "turn_plan": turn_plan,
+            "validated": validated,
+        }
+
+    compiler = FlowCompiler(
+        action_runner,
+        interrupted_turn_router=route_interrupted_turn,
+    )
 
     # 每个业务流程编译成子图，节点名 flow_<flow_id>
     flow_subgraphs = {flow.flow_id: compiler.compile_flow(flow) for flow in flows_list.flows
@@ -114,11 +173,14 @@ def build_main_graph(*,
 
         return updates
 
+    def _current_step_id(gs: GraphState, flow_id: str | None) -> str | None:
+        parsed = parse_flow_step(gs.get("flow_step"))
+        if parsed and flow_id and parsed[0] == flow_id:
+            return parsed[1]
+        return None
+
     async def task(gs: GraphState) -> dict[str, Any]:
-        """
-        任务轨道：解析 turn_plan 命令语义（start/resume/cancel/set_slots），
-        等价于原 CommandProcessor 的状态迁移，产物是"指针+槽位"
-        """
+        """处理 start/resume/cancel/set_slots，并维护可精确恢复的业务暂停栈。"""
         turn_plan = gs["turn_plan"]
         commands = turn_plan.task.commands
 
@@ -126,47 +188,87 @@ def build_main_graph(*,
         active_flow = gs.get("active_flow")
         paused = dict(gs.get("paused_flows") or {})
         flow_context = gs.get("flow_context")
+        resume_step = gs.get("resume_step")
+        next_flow_step = gs.get("flow_step")
         pending = [dict(e) for e in gs.get("pending_intents") or []]
-        intro_messages: list[AIMessage] = []  # 过场话术（等价原 system_task_started/resumed）
+        intro_messages: list[AIMessage] = []
         cancel_message = None
 
         def remove_flow(entry: dict, flow_id: str) -> dict:
-            return {"flows": [f for f in entry.get("flows", []) if f != flow_id],
-                    "knowledge_intents": entry.get("knowledge_intents", [])}
+            return {
+                "flows": [f for f in entry.get("flows", []) if f != flow_id],
+                "knowledge_intents": entry.get("knowledge_intents", []),
+            }
+
+        def pause_current() -> None:
+            nonlocal paused
+            if not active_flow:
+                return
+            paused[active_flow] = build_paused_flow_snapshot(
+                _current_step_id(gs, active_flow),
+                slots,
+            )
 
         for command in commands:
             cname = command.command
+
             if cname == "start_flow":
                 target_flow = command.flow
                 target = flows_list.get_flow_by_flow_id(target_flow)
+
                 if active_flow and active_flow != target_flow:
-                    paused[active_flow] = slots  # 中断当前流程：槽位快照入暂停栈
-                    flow_context = {"interrupted_flow_name": flows_list.get_flow_by_flow_id(active_flow).flow_name,
-                                    "started_flow_name": target.flow_name}
-                    intro_messages.append(AIMessage(
-                        content=f"好的，我们先把{flows_list.get_flow_by_flow_id(active_flow).flow_name}放一放。"))
+                    pause_current()
+                    current = flows_list.get_flow_by_flow_id(active_flow)
+                    flow_context = {
+                        "interrupted_flow_name": current.flow_name,
+                        "started_flow_name": target.flow_name,
+                    }
+                    intro_messages.append(
+                        AIMessage(content=f"好的，我们先把{current.flow_name}放一放。")
+                    )
                 elif active_flow is None:
                     flow_context = {"started_flow_name": target.flow_name}
+
+                # start 是“重新开始”语义：同名旧暂停快照失效。
+                paused.pop(target_flow, None)
                 intro_messages.append(AIMessage(content=f"好的，我们先处理{target.flow_name}。"))
                 active_flow = target_flow
-                slots = {}  # 新流程新槽位（start 语义）
-                pending = [remove_flow(e, target_flow) for e in pending]  # 即将处理的不再是"未处理"
+                slots = {}
+                resume_step = None
+                next_flow_step = f"{active_flow}:start"
+                pending = [remove_flow(e, target_flow) for e in pending]
 
             elif cname == "resume_flow":
-                target_flow = getattr(command, "flow", None)
-                if active_flow is None:
-                    if target_flow and target_flow in paused:
-                        slots = dict(paused.pop(target_flow))
-                        active_flow = target_flow
-                        flow_context = {"resumed_flow_name": flows_list.get_flow_by_flow_id(target_flow).flow_name}
-                    elif paused:
-                        fid = next(reversed(paused))
-                        slots = dict(paused.pop(fid))
-                        active_flow = fid
-                        flow_context = {"resumed_flow_name": flows_list.get_flow_by_flow_id(fid).flow_name}
-                    if active_flow:
-                        intro_messages.append(AIMessage(
-                            content=f"好的，我们继续刚才的{flows_list.get_flow_by_flow_id(active_flow).flow_name}。"))
+                requested = getattr(command, "flow", None)
+                target_flow = None
+
+                if requested and requested in paused:
+                    target_flow = requested
+                elif requested is None and paused:
+                    target_flow = next(reversed(paused))
+
+                if target_flow is not None:
+                    if active_flow and active_flow != target_flow:
+                        pause_current()
+
+                    step_id, restored_slots = unpack_paused_flow_snapshot(
+                        paused.pop(target_flow)
+                    )
+                    active_flow = target_flow
+                    slots = restored_slots
+                    resume_step = step_id
+                    next_flow_step = f"{target_flow}:{step_id or 'start'}"
+                    flow_context = {
+                        "resumed_flow_name": flows_list.get_flow_by_flow_id(
+                            target_flow
+                        ).flow_name
+                    }
+                    intro_messages.append(
+                        AIMessage(
+                            content=f"好的，我们继续刚才的"
+                            f"{flows_list.get_flow_by_flow_id(target_flow).flow_name}。"
+                        )
+                    )
 
             elif cname == "cancel_flow":
                 if active_flow:
@@ -174,25 +276,66 @@ def build_main_graph(*,
                     cancel_message = AIMessage(content=f"好的，已取消{canceled_name}。")
                     active_flow = None
                     slots = {}
-                    paused = {}
+                    flow_context = None
+                    resume_step = None
+                    next_flow_step = None
+                    # 只取消当前 Flow，不清空其他 paused_flows，允许随后精确恢复旧任务。
 
             elif cname == "set_slots":
                 slots.update(command.slots)
 
-        pending = [e for e in pending if e.get("flows") or e.get("knowledge_intents")]
+        pending = [
+            e for e in pending
+            if e.get("flows") or e.get("knowledge_intents")
+        ]
+
+        updates = {
+            "active_flow": active_flow,
+            "flow_step": next_flow_step if active_flow else None,
+            "resume_step": resume_step if active_flow else None,
+            "slots": slots,
+            "paused_flows": paused,
+            "flow_context": flow_context if active_flow else None,
+            "pending_intents": pending,
+            "interrupt_handoff": False,
+        }
 
         if cancel_message is not None:
-            return {"active_flow": None, "flow_step": None, "slots": slots,
-                    "paused_flows": paused, "flow_context": None,
-                    "pending_intents": pending, "messages": [cancel_message]}
+            return {**updates, "messages": [cancel_message]}
 
-        return {"active_flow": active_flow,
-                "flow_step": f"{active_flow}:start" if active_flow else None,
-                "slots": slots,
+        return {**updates, "messages": intro_messages}
+
+    async def interrupt_dispatch(gs: GraphState) -> dict[str, Any]:
+        """collect 中途新意图退出子图后，在父图统一处理业务暂停。"""
+        updates: dict[str, Any] = {"interrupt_handoff": False}
+        validated = gs.get("validated")
+        turn_plan = gs.get("turn_plan")
+
+        if validated is None or not validated.valid or turn_plan is None:
+            return updates
+
+        # Task 轨道交给 task()；它需要看到当前 active_flow 才能完成 swap/pause。
+        if turn_plan.task is not None:
+            return updates
+
+        # Knowledge/Chitchat 是临时 detour：先完整保存当前 Flow 的 step + slots。
+        active_flow = gs.get("active_flow")
+        if active_flow:
+            paused = dict(gs.get("paused_flows") or {})
+            paused[active_flow] = build_paused_flow_snapshot(
+                _current_step_id(gs, active_flow),
+                dict(gs.get("slots") or {}),
+            )
+            updates.update({
                 "paused_flows": paused,
-                "flow_context": flow_context if active_flow else None,
-                "pending_intents": pending,
-                "messages": intro_messages}
+                "active_flow": None,
+                "flow_step": None,
+                "resume_step": None,
+                "slots": {},
+                "flow_context": None,
+            })
+
+        return updates
 
     async def pending_follow_up(gs: GraphState) -> dict[str, Any]:
         """
@@ -288,6 +431,20 @@ def build_main_graph(*,
         # cancel 已发消息无活跃流程 → 直接追问检查
         return route_to_flow(gs) if gs.get("active_flow") else "pending_follow_up"
 
+    def route_after_interrupt_dispatch(gs: GraphState) -> str:
+        validated = gs.get("validated")
+        if validated is None or not validated.valid:
+            return "clarify"
+        turn_plan = gs["turn_plan"]
+        if turn_plan.task is not None:
+            return "task"
+        if turn_plan.knowledge is not None:
+            return "knowledge"
+        return "chitchat"
+
+    def route_after_flow_exit(gs: GraphState) -> str:
+        return "interrupt_dispatch" if gs.get("interrupt_handoff") else "pending_follow_up"
+
     # ============================== 装配 ==============================
 
     graph = StateGraph(GraphState)
@@ -296,6 +453,8 @@ def build_main_graph(*,
     graph.add_node("plan", plan)
     graph.add_node("validate", validate)
     graph.add_node("task", task)
+    graph.add_node("interrupt_dispatch", interrupt_dispatch)
+    graph.add_node("flow_exit", lambda gs: {})
     graph.add_node("pending_follow_up", pending_follow_up)
     graph.add_node("knowledge", knowledge)
     graph.add_node("chitchat", chitchat)
@@ -315,7 +474,17 @@ def build_main_graph(*,
     graph.add_conditional_edges("task", route_after_task,
                                 ["pending_follow_up"] + flow_node_names)
     for name in flow_node_names:
-        graph.add_edge(name, "pending_follow_up")
+        graph.add_edge(name, "flow_exit")
+    graph.add_conditional_edges(
+        "flow_exit",
+        route_after_flow_exit,
+        ["interrupt_dispatch", "pending_follow_up"],
+    )
+    graph.add_conditional_edges(
+        "interrupt_dispatch",
+        route_after_interrupt_dispatch,
+        ["task", "knowledge", "chitchat", "clarify"],
+    )
     graph.add_edge("pending_follow_up", END)
     graph.add_edge("knowledge", END)
     graph.add_edge("chitchat", END)
