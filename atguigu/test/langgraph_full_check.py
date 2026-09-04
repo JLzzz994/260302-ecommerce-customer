@@ -15,7 +15,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from atguigu.domain.messages import UserMessage, MessageType, FocusedObject
 from atguigu.plan.turn_plan import (TaskTurnPlan, KnowledgeTurnPlan, ChitChatTurnPlan, TurnPlan)
-from atguigu.plan.commands import StartFlowCommand, SetSlotsCommand
+from atguigu.plan.commands import ResumeFlowCommand, StartFlowCommand, SetSlotsCommand
 from atguigu.task.flows.loader import FlowLoader
 from atguigu.task.action.buidler import build_action_runner
 from atguigu.graph.main_graph import build_main_graph
@@ -64,7 +64,27 @@ class FakePlanner:
         self._plans = list(plans)
 
     async def predict(self, ctx, flows_list, knowledge_intents, **kwargs) -> TurnPlan:
-        return self._plans.pop(0)
+        if self._plans:
+            return self._plans.pop(0)
+
+        # collect interrupt 恢复后现在也会过 Planner。测试里没有显式脚本时，
+        # 按当前 step 把用户文本当作对应槽位，模拟正常“回答当前问题”。
+        step_to_slot = {
+            "ask_order_number": "order_number",
+            "ask_refund_reason": "refund_reason",
+            "ask_product_id": "product_id",
+        }
+        step_id = kwargs.get("active_flow_step")
+        slot_name = step_to_slot.get(step_id)
+        if slot_name:
+            return TurnPlan(task=TaskTurnPlan(commands=[
+                SetSlotsCommand(
+                    command="set_slots",
+                    slots={slot_name: ctx.user_message_text()},
+                )
+            ]))
+
+        raise AssertionError(f"FakePlanner 缺少 TurnPlan 脚本，step={step_id}")
 
 
 class FakeClarifyResponder:
@@ -117,7 +137,8 @@ async def test_topology():
     print("[1] 图编译与拓扑")
     app = build_app(make_saver(), [])
     nodes = set(app._graph.get_graph().nodes.keys())
-    for expected in ("ingest", "plan", "validate", "task", "knowledge", "chitchat",
+    for expected in ("ingest", "plan", "validate", "task", "interrupt_dispatch",
+                     "flow_exit", "knowledge", "chitchat",
                      "clarify", "object_dispatch", "pending_follow_up",
                      "flow_order_status_query", "flow_logistics_tracking", "flow_refund_request"):
         check(expected in nodes, f"节点存在: {expected}")
@@ -224,8 +245,67 @@ async def test_checkpointer_persistence():
     check(any("订单A999当前状态" in t for t in texts), "重启后从中断点恢复，用户回答直达流程")
 
 
+async def test_interrupt_switch_and_precise_resume():
+    print("[6] collect 中切换意图 + 指定 Flow 精确恢复")
+    plans = [
+        # 轮1：退款流程已带订单号，直接停在 ask_refund_reason。
+        TurnPlan(task=TaskTurnPlan(commands=[
+            StartFlowCommand(command="start_flow", flow="refund_request"),
+            SetSlotsCommand(command="set_slots", slots={"order_number": "A001"}),
+        ])),
+        # 轮2：用户没有回答退款原因，而是在 interrupt 中改查另一张订单。
+        TurnPlan(task=TaskTurnPlan(commands=[
+            StartFlowCommand(command="start_flow", flow="order_status_query"),
+            SetSlotsCommand(command="set_slots", slots={"order_number": "B002"}),
+        ])),
+        # 轮3：明确恢复之前暂停的退款 Flow。
+        TurnPlan(task=TaskTurnPlan(commands=[
+            ResumeFlowCommand(command="resume_flow", flow="refund_request"),
+        ])),
+    ]
+    app = build_app(make_saver(), plans)
+    config = {"configurable": {"thread_id": "switch-u"}}
+
+    r1 = await app.chat(text_msg("订单A001要退款", sender="switch-u"))
+    check(any("售后的原因" in m.text for m in r1.messages), "轮1: 退款流程停在售后原因 collect")
+
+    r2 = await app.chat(text_msg("先查订单B002的状态", sender="switch-u"))
+    texts2 = [m.text for m in r2.messages]
+    check(any("放一放" in t for t in texts2), "轮2: interrupt 输入识别为新意图并暂停旧 Flow")
+    check(any("订单B002当前状态" in t for t in texts2), "轮2: 新订单查询 Flow 正常执行")
+
+    snap2 = await app._graph.aget_state(config)
+    paused_refund = snap2.values.get("paused_flows", {}).get("refund_request")
+    check(paused_refund is not None, "旧退款 Flow 已进入 paused_flows")
+    check(paused_refund.get("step_id") == "ask_refund_reason",
+          "暂停快照保存精确 step_id=ask_refund_reason")
+    check(paused_refund.get("slots", {}).get("order_number") == "A001",
+          "暂停快照保留原订单号")
+    check("refund_reason" not in paused_refund.get("slots", {}),
+          "切换意图文本没有被误写成 refund_reason")
+
+    r3 = await app.chat(text_msg("继续刚才的退款", sender="switch-u"))
+    texts3 = [m.text for m in r3.messages]
+    check(any("继续刚才" in t for t in texts3), "轮3: resume_flow(flow=refund_request) 命中指定 Flow")
+    check(any("售后的原因" in t for t in texts3), "轮3: 恢复到原 ask_refund_reason 而不是丢失现场")
+
+    snap3 = await app._graph.aget_state(config)
+    check(snap3.values.get("active_flow") == "refund_request", "恢复后退款 Flow 重新变为 active")
+    check("refund_request" not in snap3.values.get("paused_flows", {}), "指定 Flow 已从暂停栈弹出")
+
+    # 轮4：正常回答当前 collect；FakePlanner 自动映射到 refund_reason。
+    r4 = await app.chat(text_msg("商品破损", sender="switch-u"))
+    check(any("售后处理建议" in m.text for m in r4.messages), "轮4: 恢复后的 Flow 可继续走完")
+
+    # 旧 checkpoint 兼容：历史版本 paused_flows 只有 slots，没有 step_id。
+    from atguigu.graph.state import unpack_paused_flow_snapshot
+    legacy_step, legacy_slots = unpack_paused_flow_snapshot({"order_number": "LEGACY-001"})
+    check(legacy_step is None and legacy_slots["order_number"] == "LEGACY-001",
+          "旧 slots-only paused checkpoint 仍可读取")
+
+
 async def test_validator_guards():
-    print("[6] Validator 安全闸门：flow / slot / intent 白名单")
+    print("[7] Validator 安全闸门：flow / slot / intent 白名单")
     from atguigu.knowledge.intents import KNOWLEDGE_INTENTS
     from atguigu.plan.turn_plan import ClarifyReason, KnowledgeTurnPlan
     from atguigu.plan.validator import TurnPlanValidator
@@ -285,7 +365,7 @@ async def test_validator_guards():
 
 
 async def test_refund_read_only_boundary():
-    print("[7] 旺店通售后建议：只读边界")
+    print("[8] 旺店通售后建议：只读边界")
     plans = [TurnPlan(task=TaskTurnPlan(commands=[
         StartFlowCommand(command="start_flow", flow="refund_request"),
         SetSlotsCommand(
@@ -303,7 +383,7 @@ async def test_refund_read_only_boundary():
 
 
 async def test_recommendation_fallback():
-    print("[8] 相似商品推荐：中台不可用时安全降级")
+    print("[9] 相似商品推荐：中台不可用时安全降级")
     plans = [TurnPlan(task=TaskTurnPlan(commands=[
         StartFlowCommand(command="start_flow", flow="similar_product_recommendation"),
         SetSlotsCommand(command="set_slots", slots={"product_id": "SKU-NOT-FOUND"}),
@@ -316,7 +396,7 @@ async def test_recommendation_fallback():
 
 
 async def test_handoff_without_agent():
-    print("[9] 人工转接：无在线坐席时安全降级")
+    print("[10] 人工转接：无在线坐席时安全降级")
     plans = [TurnPlan(task=TaskTurnPlan(commands=[
         StartFlowCommand(command="start_flow", flow="human_handoff"),
     ]))]
@@ -329,7 +409,7 @@ async def test_handoff_without_agent():
 
 
 async def test_agent_session_ownership():
-    print("[10] 人工坐席：会话归属校验")
+    print("[11] 人工坐席：会话归属校验")
     from atguigu.api.transfer_manager import TransferManager
 
     class FakeConnections:
@@ -372,7 +452,7 @@ async def test_agent_session_ownership():
 
 
 async def test_knowledge_and_chitchat():
-    print("[11] 知识/闲聊轨道 + 无流程卡片澄清")
+    print("[12] 知识/闲聊轨道 + 无流程卡片澄清")
     plans = [
         TurnPlan(knowledge=KnowledgeTurnPlan(intents=["refund_policy"])),
         TurnPlan(chitchat=ChitChatTurnPlan(chat="你好")),
@@ -396,10 +476,11 @@ if __name__ == "__main__":
     asyncio.run(test_multi_intent_pending())
     asyncio.run(test_card_direct_fill())
     asyncio.run(test_checkpointer_persistence())
+    asyncio.run(test_interrupt_switch_and_precise_resume())
     asyncio.run(test_validator_guards())
     asyncio.run(test_refund_read_only_boundary())
     asyncio.run(test_recommendation_fallback())
     asyncio.run(test_handoff_without_agent())
     asyncio.run(test_agent_session_ownership())
     asyncio.run(test_knowledge_and_chitchat())
-    print("\n全部通过 ✅ 旺店通 LangGraph：多轮历史、interrupt恢复、Validator白名单、售后只读、推荐降级、人工转接均正常")
+    print("\n全部通过 ✅ 旺店通 LangGraph：interrupt意图切换、精确Flow恢复、历史持久化、Validator白名单、售后只读、推荐降级、人工转接均正常")

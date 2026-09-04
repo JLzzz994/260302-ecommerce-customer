@@ -58,9 +58,22 @@ class TurnPlanner:
             "step_id": active_flow_step,
             "slots": slots or {},
         }, ensure_ascii=False) if active_flow is not None else "null"
-        interrupted_tasks_json_str = json.dumps(
-            [{"flow_id": flow_id, "slots": flow_slots} for flow_id, flow_slots in (paused_flows or {}).items()],
-            ensure_ascii=False)
+        interrupted_tasks = []
+        for flow_id, snapshot in (paused_flows or {}).items():
+            if "slots" in snapshot and ("step_id" in snapshot or len(snapshot) <= 2):
+                interrupted_tasks.append({
+                    "flow_id": flow_id,
+                    "step_id": snapshot.get("step_id"),
+                    "slots": snapshot.get("slots") or {},
+                })
+            else:
+                # 兼容旧 checkpoint：flow_id -> slots
+                interrupted_tasks.append({
+                    "flow_id": flow_id,
+                    "step_id": None,
+                    "slots": snapshot,
+                })
+        interrupted_tasks_json_str = json.dumps(interrupted_tasks, ensure_ascii=False)
 
         # 3. 卡片相关
         focused_object_json_str = json.dumps(ctx.focused_object,

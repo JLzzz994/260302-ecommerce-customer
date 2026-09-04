@@ -1,0 +1,41 @@
+name: LangGraph full check
+
+on:
+  push:
+    branches:
+      - feature/interrupt-flow-handoff
+  pull_request:
+    branches:
+      - feature/wangdiantong-customer-service
+
+jobs:
+  langgraph-full-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      LLM_MODEL: test-generation-model
+      LLM_BASE_URL: http://127.0.0.1:18080/v1
+      LLM_API_KEY: test-key
+      LLM_ROUTER_MODEL: test-turnplanner
+      LLM_ROUTER_BASE_URL: http://127.0.0.1:18081/v1
+      LLM_ROUTER_API_KEY: test-key
+      COMMERCE_API_BASE_URL: http://127.0.0.1:18082
+      CHECKPOINT_DATABASE_URL: postgresql://test:test@127.0.0.1:5432/test_checkpoint
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Sync environment
+        run: uv sync
+
+      - name: Run LangGraph regression checks
+        run: uv run python -m atguigu.test.langgraph_full_check
