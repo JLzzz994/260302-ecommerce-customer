@@ -44,6 +44,7 @@ class GraphState(TypedDict, total=False):
     active_flow: str | None                # 当前流程ID（None=无流程进行中）
     flow_step: str | None                  # 当前执行步骤 "flow_id:step_id"
     resume_step: str | None                # 重新进入子图时的精确入口 step_id；首个节点消费后清空
+    interrupt_handoff: bool                # collect 恢复输入被判定为新意图，子图退出后交回父图
     paused_flows: dict[str, dict[str, Any]] # flow_id -> {step_id, slots}；兼容旧 slots-only 快照
     flow_context: dict[str, Any] | None    # 过场话术渲染变量（started_flow_name 等）
 
