@@ -26,7 +26,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Sync locked environment
-        run: uv sync --locked
+        run: uv sync
 
       - name: Run LangGraph regression checks
         run: uv run python -m atguigu.test.langgraph_full_check
