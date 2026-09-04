@@ -16,6 +16,17 @@ from atguigu.domain.messages import UserMessage
 from atguigu.plan.turn_plan import TurnPlan, TurnPlanValidatedResult
 
 
+class PausedFlowSnapshot(TypedDict, total=False):
+    """业务级暂停快照。
+
+    新版保存 step_id + slots，支持精确恢复；读取时仍兼容旧 checkpoint
+    的 flow_id -> slots 结构。
+    """
+
+    step_id: str | None
+    slots: dict[str, Any]
+
+
 class GraphState(TypedDict, total=False):
     # ===== 身份 =====
     sender_id: str
@@ -31,8 +42,9 @@ class GraphState(TypedDict, total=False):
     # ===== 流程运行时（跨轮，checkpoint 持久化） =====
     slots: dict[str, Any]                  # 当前活跃流程的槽位
     active_flow: str | None                # 当前流程ID（None=无流程进行中）
-    flow_step: str | None                  # 步骤指针 "flow_id:step_id"（自循环推进）
-    paused_flows: dict[str, dict]          # 被中断的流程：flow_id -> slots 快照
+    flow_step: str | None                  # 当前执行步骤 "flow_id:step_id"
+    resume_step: str | None                # 重新进入子图时的精确入口 step_id；首个节点消费后清空
+    paused_flows: dict[str, dict[str, Any]] # flow_id -> {step_id, slots}；兼容旧 slots-only 快照
     flow_context: dict[str, Any] | None    # 过场话术渲染变量（started_flow_name 等）
 
     # ===== 卡片 =====
@@ -52,3 +64,15 @@ def parse_flow_step(key: str | None) -> tuple[str, str] | None:
         return None
     flow_id, _, step_id = key.partition(":")
     return flow_id, step_id
+
+
+def build_paused_flow_snapshot(step_id: str | None, slots: dict[str, Any]) -> PausedFlowSnapshot:
+    """创建新版暂停快照，复制 slots，避免后续活跃流程修改污染快照。"""
+    return PausedFlowSnapshot(step_id=step_id, slots=dict(slots))
+
+
+def unpack_paused_flow_snapshot(snapshot: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
+    """读取暂停快照，并兼容旧版 flow_id -> slots 的 checkpoint。"""
+    if "slots" in snapshot and ("step_id" in snapshot or len(snapshot) <= 2):
+        return snapshot.get("step_id"), dict(snapshot.get("slots") or {})
+    return None, dict(snapshot)
