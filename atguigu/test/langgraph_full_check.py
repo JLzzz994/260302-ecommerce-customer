@@ -267,7 +267,7 @@ async def test_interrupt_switch_and_precise_resume():
     config = {"configurable": {"thread_id": "switch-u"}}
 
     r1 = await app.chat(text_msg("订单A001要退款", sender="switch-u"))
-    check(any("退款原因" in m.text for m in r1.messages), "轮1: 退款流程停在退款原因 collect")
+    check(any("售后的原因" in m.text for m in r1.messages), "轮1: 退款流程停在售后原因 collect")
 
     r2 = await app.chat(text_msg("先查订单B002的状态", sender="switch-u"))
     texts2 = [m.text for m in r2.messages]
@@ -287,7 +287,7 @@ async def test_interrupt_switch_and_precise_resume():
     r3 = await app.chat(text_msg("继续刚才的退款", sender="switch-u"))
     texts3 = [m.text for m in r3.messages]
     check(any("继续刚才" in t for t in texts3), "轮3: resume_flow(flow=refund_request) 命中指定 Flow")
-    check(any("退款原因" in t for t in texts3), "轮3: 恢复到原 ask_refund_reason 而不是丢失现场")
+    check(any("售后的原因" in t for t in texts3), "轮3: 恢复到原 ask_refund_reason 而不是丢失现场")
 
     snap3 = await app._graph.aget_state(config)
     check(snap3.values.get("active_flow") == "refund_request", "恢复后退款 Flow 重新变为 active")
