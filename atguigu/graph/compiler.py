@@ -210,9 +210,9 @@ class FlowCompiler:
                             **updates,
                             "turn_plan": routed["turn_plan"],
                             "validated": routed["validated"],
+                            "interrupt_handoff": True,
                         },
-                        goto="interrupt_dispatch",
-                        graph=Command.PARENT,
+                        goto=END,
                     )
 
                 value = routed.get("value") if routed.get("kind") == "slot" else self._extract_answer_value(answer)
@@ -248,9 +248,9 @@ class FlowCompiler:
                             **updates,
                             "turn_plan": routed["turn_plan"],
                             "validated": routed["validated"],
+                            "interrupt_handoff": True,
                         },
-                        goto="interrupt_dispatch",
-                        graph=Command.PARENT,
+                        goto=END,
                     )
 
                 value = routed.get("value") if routed.get("kind") == "slot" else self._extract_answer_value(answer)
@@ -276,6 +276,7 @@ class FlowCompiler:
             return {"active_flow": None,
                     "flow_step": None,
                     "resume_step": None,
+                    "interrupt_handoff": False,
                     "flow_context": None,
                     "last_completed_flow": flow.flow_id}
         return end_node
