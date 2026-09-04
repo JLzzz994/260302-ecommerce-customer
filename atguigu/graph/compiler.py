@@ -16,11 +16,11 @@
 """
 
 import re
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from langchain_core.messages import AIMessage
 from langgraph.graph import StateGraph, START, END
-from langgraph.types import interrupt
+from langgraph.types import Command, interrupt
 
 from atguigu.domain.messages import BotMessage
 from atguigu.graph.context import TurnContext
@@ -71,8 +71,16 @@ def _first_static_next(step: FlowStep) -> str | None:
 
 class FlowCompiler:
 
-    def __init__(self, action_runner: ActionRunner):
+    def __init__(
+        self,
+        action_runner: ActionRunner,
+        interrupted_turn_router: Callable[
+            [GraphState, str, str, str, Any],
+            Awaitable[dict[str, Any]],
+        ] | None = None,
+    ):
         self._action_runner = action_runner
+        self._interrupted_turn_router = interrupted_turn_router
 
     def compile_flow(self, flow: Flow) -> Any:
         """把一个流程编译成子图（返回 compiled subgraph，可被 add_node 挂进主图）"""
@@ -81,16 +89,21 @@ class FlowCompiler:
         steps = {step.id: step for step in flow.steps}
         entry = self._entry_step_id(flow)
 
-        # START → 入口步骤（start步骤是纯跳板：编译期把它的出边接到START上，
-        # 含条件出边的 start（如 similar_product_recommendation）用条件边路由）
+        # 子图入口支持两种模式：
+        # 1) 新流程：按 YAML start 的 next 进入；
+        # 2) 恢复流程：resume_step 指向暂停时的精确 step，避免从 start 重放副作用节点。
         first_step = steps[entry]
-        if self._is_passthrough(first_step):
-            if all(isinstance(link, FlowStepStaticLink) for link in first_step.next):
-                builder.add_edge(START, f"step_{first_step.next[0].target}")
-            else:
-                self._add_step_edges(builder, first_step, from_start=True)
-        else:
-            builder.add_edge(START, f"step_{entry}")
+
+        def route_entry(gs: GraphState) -> str:
+            resume_step = gs.get("resume_step")
+            if resume_step and resume_step in steps and resume_step != entry:
+                return f"step_{resume_step}"
+
+            if self._is_passthrough(first_step):
+                return self._resolve_step_target(first_step, gs.get("slots") or {})
+            return f"step_{entry}"
+
+        builder.add_conditional_edges(START, route_entry)
 
         # 每个步骤注册为节点 + 出边（start 跳板被绕过；end 是 terminal 节点）
         for step in flow.steps:
@@ -101,11 +114,15 @@ class FlowCompiler:
 
             if step.__class__.__name__ == "EndFlowStep":
                 builder.add_edge(f"step_{step.id}", END)  # end：打完成标记后直接结束子图
-            elif isinstance(step, (ActionFlowStep, CollectFlowStep)):
+            elif isinstance(step, ActionFlowStep):
                 if not step.next:
                     builder.add_edge(f"step_{step.id}", END)  # 防御：无出边直达END
                 else:
                     self._add_step_edges(builder, step)
+            elif isinstance(step, CollectFlowStep):
+                # collect 自己返回 Command(goto=...)：
+                # 正常答案走子图下一步；中途新意图可 Command.PARENT 跳回主图。
+                pass
             else:
                 builder.add_edge(f"step_{step.id}", END)
 
@@ -133,7 +150,10 @@ class FlowCompiler:
 
             result = await action_runner.run(ActionCall(action_name=step.action, action_kwargs=action_kwargs), ctx)
 
-            updates: dict[str, Any] = {"flow_step": f"{flow.flow_id}:{step.id}"}
+            updates: dict[str, Any] = {
+                "flow_step": f"{flow.flow_id}:{step.id}",
+                "resume_step": None,
+            }
 
             # 1. 消息（action_response 产生）
             if result.messages:
@@ -162,7 +182,10 @@ class FlowCompiler:
         async def collect_node(gs: GraphState) -> dict[str, Any]:
             from langchain_core.messages import AIMessage
             slots = dict(gs.get("slots") or {})
-            updates: dict[str, Any] = {"flow_step": f"{flow.flow_id}:{step.id}"}
+            updates: dict[str, Any] = {
+                "flow_step": f"{flow.flow_id}:{step.id}",
+                "resume_step": None,
+            }
 
             # 0. 卡片直填（对象消息路径：用户点了订单/商品卡片）
             card_slot = self._card_fill_slot(gs, slot_name, slots)
@@ -177,32 +200,73 @@ class FlowCompiler:
                                                  slots, gs)
                 answer = interrupt({"question": question, "slot": slot_name})
 
-                # 恢复点：answer 是本轮用户输入（文本 or 卡片ID）
-                value = self._extract_answer_value(answer)
+                # 恢复后先判断：这是当前槽位答案，还是用户在 collect 中发起了新意图。
+                routed = await self._route_interrupted_turn(
+                    gs, flow.flow_id, step.id, slot_name, answer
+                )
+                if routed.get("kind") == "parent":
+                    return Command(
+                        update={
+                            **updates,
+                            "turn_plan": routed["turn_plan"],
+                            "validated": routed["validated"],
+                        },
+                        goto="interrupt_dispatch",
+                        graph=Command.PARENT,
+                    )
+
+                value = routed.get("value") if routed.get("kind") == "slot" else self._extract_answer_value(answer)
                 if value:
                     slots[slot_name] = value
-                    return {**updates, "slots": slots}
-                else:
-                    # 用户这条消息没回答（比如又点了张无关卡片）——重新中断继续等
-                    return self._re_interrupt(step, slots, gs, updates)
+                    return Command(
+                        update={**updates, "slots": slots},
+                        goto=self._resolve_step_target(step, slots),
+                    )
+
+                # 用户这条消息没有形成可用槽位值——重新中断继续等
+                return self._re_interrupt(step, slots, gs, updates)
 
             # 2. 已有值 → 校验（配置了才校验）
             if step.validate is not None:
                 if eval_condition(step.validate.condition, slots):
-                    return {**updates, "slots": slots}  # 放行，走 next 边
+                    return Command(
+                        update={**updates, "slots": slots},
+                        goto=self._resolve_step_target(step, slots),
+                    )
                 # 校验不过：删除槽位重新问（与原实现语义一致）
                 slots.pop(slot_name, None)
                 failure_text = step.validate.failure_response.text if step.validate.failure_response else None
                 question = self._render_question(failure_text, slots, gs) if failure_text else "您填写的信息有误，请重新填写。"
                 answer = interrupt({"question": question, "slot": slot_name})
-                value = self._extract_answer_value(answer)
+
+                routed = await self._route_interrupted_turn(
+                    gs, flow.flow_id, step.id, slot_name, answer
+                )
+                if routed.get("kind") == "parent":
+                    return Command(
+                        update={
+                            **updates,
+                            "turn_plan": routed["turn_plan"],
+                            "validated": routed["validated"],
+                        },
+                        goto="interrupt_dispatch",
+                        graph=Command.PARENT,
+                    )
+
+                value = routed.get("value") if routed.get("kind") == "slot" else self._extract_answer_value(answer)
                 if value and eval_condition(step.validate.condition, {**slots, slot_name: value}):
                     slots[slot_name] = value
-                    return {**updates, "slots": slots}
+                    return Command(
+                        update={**updates, "slots": slots},
+                        goto=self._resolve_step_target(step, slots),
+                    )
                 # 还是不行：重新中断（下轮继续问）
                 return self._re_interrupt(step, slots, gs, updates)
 
-            return {**updates, "slots": slots}
+            return Command(
+                update={**updates, "slots": slots},
+                goto=self._resolve_step_target(step, slots),
+            )
 
         return collect_node
 
@@ -211,6 +275,7 @@ class FlowCompiler:
         async def end_node(gs: GraphState) -> dict[str, Any]:
             return {"active_flow": None,
                     "flow_step": None,
+                    "resume_step": None,
                     "flow_context": None,
                     "last_completed_flow": flow.flow_id}
         return end_node
@@ -225,24 +290,29 @@ class FlowCompiler:
             builder.add_edge(src, self._target_of(step.next[0]))
             return
 
-        # 带条件/兜底边：路由函数闭包捕获链接定义
-        links = list(step.next)
-        static_target = None
-        for link in links:
-            if isinstance(link, FlowStepStaticLink):
-                static_target = link.target
-
         def route(gs: GraphState) -> str:
-            slots = gs.get("slots") or {}
-            fallback = static_target
-            for link in links:
-                if isinstance(link, FlowStepConditionLink) and eval_condition(link.condition, slots):
-                    return self._target_of(link)
-                if isinstance(link, FlowStepFallbackLink):
-                    fallback = link.target
-            return self._target_of_raw(fallback)
+            return self._resolve_step_target(step, gs.get("slots") or {})
 
         builder.add_conditional_edges(src, route)
+
+    def _resolve_step_target(self, step: FlowStep, slots: dict[str, Any]) -> str:
+        """根据静态/条件/兜底边确定下一个子图节点。"""
+        if not step.next:
+            return END
+
+        if all(isinstance(link, FlowStepStaticLink) for link in step.next):
+            return self._target_of(step.next[0])
+
+        fallback: str | None = None
+        for link in step.next:
+            if isinstance(link, FlowStepConditionLink) and eval_condition(link.condition, slots):
+                return self._target_of(link)
+            if isinstance(link, FlowStepFallbackLink):
+                fallback = link.target
+            elif isinstance(link, FlowStepStaticLink) and fallback is None:
+                fallback = link.target
+
+        return self._target_of_raw(fallback or "__end__")
 
     def _target_of(self, link: FlowStepLink) -> str:
         return self._target_of_raw(link.target)
@@ -282,6 +352,22 @@ class FlowCompiler:
     def _render_question(self, text: str, slots: dict, gs: GraphState) -> str:
         from jinja2 import Template
         return Template(text).render(slots=slots, context=gs.get("flow_context") or {})
+
+    async def _route_interrupted_turn(
+        self,
+        gs: GraphState,
+        flow_id: str,
+        step_id: str,
+        slot_name: str,
+        answer: Any,
+    ) -> dict[str, Any]:
+        """让父图 Planner 判断 collect 恢复输入是否其实是新的业务/控制意图。"""
+        if self._interrupted_turn_router is None:
+            return {"kind": "answer"}
+
+        return await self._interrupted_turn_router(
+            gs, flow_id, step_id, slot_name, answer
+        )
 
     def _extract_answer_value(self, answer: Any) -> Any:
         """从恢复值里取槽位值：直接值 / {"text":..} / 卡片 {"object_id":..}"""
