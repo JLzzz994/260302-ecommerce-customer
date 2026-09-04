@@ -12,6 +12,15 @@ jobs:
   langgraph-full-check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      LLM_MODEL: test-generation-model
+      LLM_BASE_URL: http://127.0.0.1:18080/v1
+      LLM_API_KEY: test-key
+      LLM_ROUTER_MODEL: test-turnplanner
+      LLM_ROUTER_BASE_URL: http://127.0.0.1:18081/v1
+      LLM_ROUTER_API_KEY: test-key
+      COMMERCE_API_BASE_URL: http://127.0.0.1:18082
+      CHECKPOINT_DATABASE_URL: postgresql://test:test@127.0.0.1:5432/test_checkpoint
 
     steps:
       - name: Checkout
@@ -25,7 +34,7 @@ jobs:
       - name: Install Python
         run: uv python install 3.12
 
-      - name: Sync locked environment
+      - name: Sync environment
         run: uv sync
 
       - name: Run LangGraph regression checks
