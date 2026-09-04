@@ -1,0 +1,32 @@
+name: LangGraph full check
+
+on:
+  push:
+    branches:
+      - feature/interrupt-flow-handoff
+  pull_request:
+    branches:
+      - feature/wangdiantong-customer-service
+
+jobs:
+  langgraph-full-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v9
+        with:
+          enable-cache: true
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Sync locked environment
+        run: uv sync --locked
+
+      - name: Run LangGraph regression checks
+        run: uv run python -m atguigu.test.langgraph_full_check
